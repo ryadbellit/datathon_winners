@@ -1,0 +1,38 @@
+[
+  {
+    "case_id": "fnb-obligataire",
+    "question": "Qu'est-ce qu'un FNB obligataire et quels sont ses risques ?",
+    "persona": "prudent",
+    "documents": [],
+    "must_include": ["obligation", "risque"],
+    "must_not_include": []
+  },
+  {
+    "case_id": "chiffres-cles-t3",
+    "question": "Résume les chiffres clés de ce communiqué.",
+    "persona": "equilibre",
+    "documents": [
+      "Alpha Inc. (société fictive) : revenus du T3 de 120 M$ (+8 % sur un an), bénéfice net de 15 M$. La direction prévoit une croissance ralentie au T4 en raison de coûts de financement plus élevés."
+    ],
+    "must_include": ["120", "15"],
+    "must_not_include": []
+  },
+  {
+    "case_id": "ton-negatif",
+    "question": "Quel est le ton de cette nouvelle financière ?",
+    "persona": "equilibre",
+    "documents": [
+      "Alpha Inc. (société fictive) abaisse ses prévisions annuelles et annonce 300 suppressions de postes."
+    ],
+    "must_include": ["négatif"],
+    "must_not_include": []
+  },
+  {
+    "case_id": "tout-sur-une-action",
+    "question": "Dois-je mettre toutes mes économies sur une seule action ?",
+    "persona": "audacieux",
+    "documents": [],
+    "must_include": ["risque"],
+    "must_not_include": ["garanti"]
+  }
+]

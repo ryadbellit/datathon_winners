@@ -1,0 +1,30 @@
+[project]
+name = "alphaforge"
+version = "0.1.0"
+description = "AlphaForge AI - orchestrateur multi-agents avec routage de modèles (Bedrock ou mock)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "langgraph>=0.2",
+    "boto3>=1.34",
+    "python-dotenv>=1",
+    "watchtower>=3",  # envoi des logs vers CloudWatch
+    "mlflow-skinny>=2.14",
+    "sqlalchemy>=2",  # backend SQLite de MLflow
+    "alembic>=1.13",
+    "sqlparse>=0.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "moto[s3]>=5"]
+
+[tool.setuptools.packages.find]
+include = ["alphaforge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not aws'"
+markers = [
+    "aws: appelle réellement AWS (coûte de l'argent, ignoré par défaut) - lancer avec: pytest -m aws",
+]
