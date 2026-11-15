@@ -1,0 +1,8 @@
+{
+  "holdings": [
+    {"ticker": "NVDA", "name": "NVIDIA", "weight_pct": 20, "sector": "Semi-conducteurs"},
+    {"ticker": "AMD", "name": "AMD", "weight_pct": 10, "sector": "Semi-conducteurs"},
+    {"ticker": "BND", "name": "Obligations", "weight_pct": 70, "sector": "Obligations"}
+  ],
+  "as_of": "2025-01-24"
+}

@@ -89,7 +89,7 @@ class GovernanceAgent(TeamAgent):
         "sinon) et ne la reprends jamais dans validated_claims."
     )
     task = "arbitration"
-    max_tokens = 3000
+    max_tokens = 6000  # Sonnet 5.5 dépassait 3000 sur des données réelles (JSON tronqué)
     Output = GovernanceOutput
 
     def failed(self, error: str) -> GovernanceOutput:

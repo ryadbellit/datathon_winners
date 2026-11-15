@@ -53,7 +53,7 @@ class DevilsAdvocate(TeamAgent):
         "preuves confirmeraient ou infirmeraient chaque interprétation."
     )
     task = "arbitration"
-    max_tokens = 3000
+    max_tokens = 6000  # Sonnet 5.5 dépassait 3000 sur des données réelles (JSON tronqué)
     Output = DevilOutput
 
     @staticmethod

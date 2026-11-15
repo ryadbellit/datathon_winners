@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--mlflow", action="store_true", help="Enregistre le run dans MLflow")
     ev.add_argument("--baseline", action="store_true", help="Compare à la baseline ; code de sortie 1 si régression")
     ev.add_argument("--save-baseline", action="store_true", help="Enregistre ce run comme nouvelle baseline")
-    ev.add_argument("--team", action="store_true", help="Évalue le workflow à 5 agents (ex. --dataset golden_team_v1)")
+    ev.add_argument("--team", action="store_true", help="Évalue le workflow à 6 agents (ex. --dataset golden_team_v1)")
     ev.add_argument("--with-kb", action="store_true", help="Utilise aussi la Knowledge Base")
     ev.set_defaults(func=cmd_evaluate)
 

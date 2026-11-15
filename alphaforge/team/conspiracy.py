@@ -46,9 +46,9 @@ class ConspiracyTheorist(TeamAgent):
         "chercheraient à contrôler les marchés. Propose des théories du complot à partir des preuves fournies, avec l'acteur "
         "soupçonné et le mobile supposé. Mais tu restes honnête sur les faits : tu ne peux que réinterpréter les preuves "
         "existantes, sans inventer de document, de source, de chiffre ni de date. Ne vise aucune personne nommée. Pour chaque "
-        "théorie, indique précisément quelle preuve la confirmerait ou la réfuterait. Tes théories sont des hypothèses, jamais des faits."
+        "théorie, indique précisément quelle preuve la confirmerait ou la réfuterait. Tes théories sont des hypothèses, jamais des faits. "
+        "Au plus 3 théories, chaque champ en une ou deux phrases."
     )
-    max_tokens = 1500
     Output = ConspiracyOutput
 
     def run(self, question: str, evidence: list[Evidence]) -> tuple[ConspiracyOutput, list[LLMResponse]]:
