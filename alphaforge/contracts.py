@@ -1,6 +1,7 @@
 """Contrats de données et State du graphe LangGraph."""
 from __future__ import annotations
 
+import datetime as dt
 import operator
 import uuid
 from enum import Enum
@@ -30,11 +31,46 @@ class TokenUsage(BaseModel):
         )
 
 
+class NewsItem(BaseModel):
+    title: str
+    source: str
+    date: dt.date
+    text: str = ""
+    url: str | None = None
+
+
+class PricePoint(BaseModel):
+    ticker: str
+    date: dt.date
+    close: float
+    currency: str = "USD"
+
+
+class Holding(BaseModel):
+    ticker: str
+    name: str = ""
+    weight_pct: float = Field(ge=0, le=100)
+    sector: str | None = None
+
+
+class Portfolio(BaseModel):
+    holdings: list[Holding]
+    as_of: dt.date | None = None
+
+
 class AnalysisRequest(BaseModel):
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     question: str = Field(min_length=1)
     persona: Persona = Persona.BALANCED
     documents: list[str] = []
+    # Données optionnelles pour l'équipe de 5 agents (alphaforge/team) ; fournies par l'appelant ou par les interfaces.
+    tickers: list[str] = []
+    news: list[NewsItem] = []
+    prices: list[PricePoint] = []
+    portfolio: Portfolio | None = None
+    user_id: str | None = None  # permet de charger le portefeuille via PortfolioProvider
+    horizon_years: int | None = None
+    as_of: dt.date | None = None  # les preuves postérieures sont ignorées (pas de look-ahead)
 
 
 class AgentResult(BaseModel):

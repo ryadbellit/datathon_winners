@@ -85,6 +85,7 @@ def model_call_logger(emf: bool):
         extra = {
             "event": "model_call",
             "task": request.task,
+            "agent": request.agent,
             "model_id": response.model_id,
             "latency_ms": round(response.latency_ms, 1),
             "input_tokens": response.usage.input_tokens,

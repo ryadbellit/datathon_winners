@@ -1,6 +1,7 @@
 """Évaluation : règles déterministes + juge LLM, détection de régression, suivi MLflow."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import time
@@ -10,9 +11,8 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 from alphaforge.config import Settings
-from alphaforge.contracts import AnalysisRequest, Persona, TokenUsage
+from alphaforge.contracts import AnalysisRequest, NewsItem, Persona, Portfolio, PricePoint, TokenUsage
 from alphaforge.llm import LLMError, LLMRequest
-from alphaforge.orchestrator import Orchestrator
 from alphaforge.storage import DATASETS, Storage
 
 # Promesses interdites dans toute réponse, quel que soit le cas.
@@ -34,6 +34,17 @@ class EvalCase(BaseModel):
     documents: list[str] = []
     must_include: list[str] = []  # mots ou chiffres attendus dans la réponse
     must_not_include: list[str] = []
+    # Scénarios de l'équipe de 5 agents (cf. `evaluate --team`)
+    tickers: list[str] = []
+    news: list[NewsItem] = []
+    prices: list[PricePoint] = []
+    portfolio: Portfolio | None = None
+    horizon_years: int | None = None
+    as_of: dt.date | None = None
+    expected_assessment: str | None = None  # supported | partially_supported | insufficient_evidence
+
+    def to_request(self) -> AnalysisRequest:
+        return AnalysisRequest(**self.model_dump(exclude={"case_id", "must_include", "must_not_include", "expected_assessment"}))
 
 
 class Verdict(BaseModel):
@@ -91,27 +102,29 @@ def judge(llm, case: EvalCase, answer: str) -> Verdict:
     return Verdict(score=None, rationale="Sortie du juge illisible")
 
 
-def check_rules(case: EvalCase, answer: str, degraded_agents: list[str]) -> list[str]:
+def check_rules(case: EvalCase, answer: str, degraded_agents: list[str], assessment: str | None = None) -> list[str]:
     text = answer.lower()
     failures = [] if answer.strip() else ["réponse vide"]
     failures += [f"manque « {kw} »" for kw in case.must_include if kw.lower() not in text]
     failures += [f"contient « {kw} » (interdit)" for kw in (*case.must_not_include, *FORBIDDEN_PHRASES) if kw.lower() in text]
+    if case.expected_assessment and assessment != case.expected_assessment:
+        failures.append(f"verdict « {assessment} » au lieu de « {case.expected_assessment} »")
     if degraded_agents:
         failures.append(f"agents en échec : {', '.join(degraded_agents)}")
     return failures
 
 
-def run_evaluation(orchestrator: Orchestrator, llm, cases: list[EvalCase], dataset: str) -> EvalReport:
+def run_evaluation(orchestrator, llm, cases: list[EvalCase], dataset: str) -> EvalReport:
     results = []
     for case in cases:
         started = time.perf_counter()
-        report = orchestrator.run(AnalysisRequest(question=case.question, persona=case.persona, documents=case.documents))
+        report = orchestrator.run(case.to_request())
         degraded = [r.agent for r in report.agent_results if r.error]
         results.append(
             CaseResult(
                 case_id=case.case_id,
                 answer=report.answer,
-                rule_failures=check_rules(case, report.answer, degraded),
+                rule_failures=check_rules(case, report.answer, degraded, getattr(report, "assessment", None)),
                 judge=judge(llm, case, report.answer),
                 usage=report.usage,
                 estimated_cost_usd=report.estimated_cost_usd,

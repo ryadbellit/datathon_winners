@@ -29,10 +29,11 @@ logger = logging.getLogger("alphaforge.router")
 
 
 class LLMRequest(BaseModel):
-    task: str  # orchestration | agent | evaluation : sert au routage
+    task: str  # orchestration | arbitration | agent | evaluation : sert au routage
     prompt: str
     system: str | None = None
     max_tokens: int | None = None  # None : limite configurée pour la tâche
+    agent: str | None = None  # nom de l'agent appelant : attribution des logs et du coût
 
 
 class LLMResponse(BaseModel):
@@ -74,6 +75,8 @@ class AllModelsFailedError(LLMError):
         super().__init__(f"Tous les modèles de la tâche '{task}' ont échoué : " + " | ".join(attempts))
 
 
+# Tâche sans route propre -> route d'une tâche voisine (puis "default") : « arbitration » = modèle fort, sans guardrail.
+TASK_FALLBACKS = {"arbitration": "orchestration"}
 FALLBACK_ERRORS = (ModelUnavailableError, ThrottledError, ProviderTimeoutError)
 
 
@@ -215,7 +218,7 @@ class ModelRouter:
         return (usage.input_tokens * price["input_per_1m"] + usage.output_tokens * price["output_per_1m"]) / 1e6
 
     def complete(self, request: LLMRequest) -> LLMResponse:
-        entries = self._routes.get(request.task) or self._routes.get("default")
+        entries = self._routes.get(request.task) or self._routes.get(TASK_FALLBACKS.get(request.task, "")) or self._routes.get("default")
         if not entries:
             raise NoRouteError(f"Aucune route pour la tâche '{request.task}' et pas de route 'default'")
         if request.max_tokens is None:

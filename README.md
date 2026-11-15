@@ -2,7 +2,7 @@
 
 Orchestrateur multi-agents (LangGraph) : trois agents analysent une question financière en parallèle (documents, sentiment,
 risque selon le persona Prudent / Équilibré / Audacieux), puis un modèle synthétise. Les appels passent par un `ModelRouter` :
-**Amazon Bedrock** ou un **mock local** (sans AWS). Ce dépôt ne contient ni frontend, ni calculs financiers, ni modèles ML.
+**Amazon Bedrock** ou un **mock local** (sans AWS). L'équipe de 5 agents (`analyze`) ajoute un débat contradictoire et un verdict fondé sur les preuves. Ce dépôt ne contient ni frontend, ni calculs financiers, ni modèles ML.
 
 ```
 question + persona
@@ -22,6 +22,7 @@ chaque appel : ModelRouter ─► tâche (agent | orchestration | evaluation) �
 | `observability.py` | Logs JSON (CloudWatch), métriques, suivi des tokens et du coût |
 | `evaluation.py` | Règles + juge LLM, détection de régression, MLflow |
 | `config.py`, `cli.py` | Configuration (`.env`) et commandes |
+| `team/` | **Workflow à 5 agents avec débat** (preuves, événements, portefeuille, avocat du diable, gouvernance) : voir [`alphaforge/team/README.md`](alphaforge/team/README.md) |
 
 ## Installation
 
@@ -35,6 +36,8 @@ copy .env.example .env      # puis éditez .env
 ```powershell
 python -m alphaforge check-routes                      # teste chaque modèle configuré
 python -m alphaforge ask "Quels sont les risques d'Alpha Inc. ?" --persona prudent [--doc fichier.txt]
+python -m alphaforge analyze "Pourquoi NVIDIA a baissé ?" --ticker NVDA --news n.json --prices p.json --portfolio pf.json   # 5 agents + débat
+python -m pytest -q                                    # tests (aucun appel AWS)
 python -m alphaforge upload-datasets                   # envoie ./data/datasets vers le stockage configuré (S3)
 python -m alphaforge evaluate --dataset golden_v1 --mlflow
 python -m alphaforge evaluate --save-baseline          # enregistre la référence
@@ -49,7 +52,7 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `LLM_ROUTES` | mock | `{"tâche": ["fournisseur:model_id", ...]}`, fallback dans l'ordre ; tâches `orchestration`, `agent`, `evaluation`, `default` ; fournisseurs `mock`, `bedrock` |
+| `LLM_ROUTES` | mock | `{"tâche": ["fournisseur:model_id", ...]}`, fallback dans l'ordre ; tâches `orchestration`, `agent`, `evaluation`, `arbitration` (avocat du diable + gouvernance ; sans route : reprend `orchestration`, **sans Guardrail**), `default` ; fournisseurs `mock`, `bedrock` |
 | `LLM_MAX_TOKENS` | 2048 / 4096 / 2048 / 600 | Limite de sortie par tâche (trop bas = réponses tronquées, événement `truncated`) |
 | `LLM_PRICING` | `{}` | `{"model_id": {"input_per_1m": x, "output_per_1m": y}}` en USD ; vide = coût « inconnu » |
 | `AWS_REGION` / `AWS_PROFILE` | `us-east-1` / vide | Région ; profil local (sinon chaîne par défaut de boto3 : rôle IAM, variables) |
@@ -98,6 +101,7 @@ c'est le rôle d'exécution qui écrit.
 
 - Les IDs de modèles sont à vérifier sur votre compte (`check-routes`) : tous les modèles Bedrock ne sont pas forcément activés.
 - 4 cas d'évaluation seulement ; le juge est stochastique (±0,25 observé) ; la baseline dépend des modèles utilisés.
-- Agents = squelettes : aucune donnée de marché ni appel d'outil. Pas d'API ni de frontend.
+- Les 3 agents de `ask` sont des squelettes. L'équipe de 5 agents n'a pas de source de données réelle (interfaces `team/interfaces.py` à brancher) et pas de MLflow Tracing.
+- Pas d'API ni de frontend.
 - Le `Dockerfile` (ECS Fargate) est fourni mais jamais construit ni déployé.
-- Il n'y a pas de tests automatisés : vérifier avec `check-routes`, `ask` et `evaluate`.
+- Tests : `tests/test_team.py` couvre l'équipe de 5 agents (fournisseur scripté). Le reste se vérifie avec `check-routes`, `ask` et `evaluate`.

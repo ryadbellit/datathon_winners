@@ -1,27 +1,29 @@
-"""Ligne de commande : ask | evaluate | check-routes | upload-datasets."""
+"""Ligne de commande : ask | analyze | evaluate | check-routes | upload-datasets."""
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import sys
 from pathlib import Path
 
 from alphaforge.config import Settings, get_settings
-from alphaforge.contracts import AnalysisRequest, Persona
+from alphaforge.contracts import AnalysisRequest, NewsItem, Persona, Portfolio, PricePoint
 from alphaforge.evaluation import Baseline, detect_regression, load_dataset, log_to_mlflow, run_evaluation
 from alphaforge.llm import LLMError, LLMRequest, ModelRouter
 from alphaforge.observability import UsageTracker, model_call_logger, setup_logging
 from alphaforge.orchestrator import Orchestrator
 from alphaforge.retrieval import KnowledgeBase
 from alphaforge.storage import BASELINES, DATASETS, REPORTS, LocalStorage, StorageNotFoundError, get_storage
+from alphaforge.team import TeamOrchestrator
 
 
-def _build(settings: Settings, with_kb: bool = True):
+def _build(settings: Settings, with_kb: bool = True, team: bool = False):
     setup_logging(settings)
     tracker = UsageTracker()
     router = ModelRouter.from_settings(settings, [tracker, model_call_logger(settings.cloudwatch_metrics)])
     kb = KnowledgeBase(settings) if with_kb and settings.knowledge_base_id else None
-    return Orchestrator(router, kb), router, tracker
+    return (TeamOrchestrator(router, kb) if team else Orchestrator(router, kb)), router, tracker
 
 
 def cmd_ask(args, settings: Settings) -> int:
@@ -38,8 +40,36 @@ def cmd_ask(args, settings: Settings) -> int:
     return 0
 
 
+def cmd_analyze(args, settings: Settings) -> int:
+    """Workflow à 5 agents (preuves, événements, portefeuille, avocat du diable, gouvernance)."""
+    orchestrator, _, tracker = _build(settings, team=True)
+
+    def load(path, model):
+        return [model.model_validate(x) for x in json.loads(Path(path).read_text(encoding="utf-8"))] if path else []
+
+    request = AnalysisRequest(
+        question=args.question,
+        persona=Persona(args.persona),
+        documents=[Path(p).read_text(encoding="utf-8") for p in args.doc],
+        tickers=args.ticker,
+        news=load(args.news, NewsItem),
+        prices=load(args.prices, PricePoint),
+        portfolio=Portfolio.model_validate_json(Path(args.portfolio).read_text(encoding="utf-8")) if args.portfolio else None,
+        horizon_years=args.horizon_years,
+        as_of=args.as_of,
+    )
+    report = orchestrator.run(request)
+    print(f"\n{report.answer}\n")
+    print(f"=== Verdict : {report.assessment} | tours de débat : {report.debate_rounds} | preuves : {len(report.evidence)} ===")
+    for r in report.agent_results:
+        print(f"- {r.agent:<28} {r.summary}" + (f" ERREUR={r.error}" if r.error else ""))
+    print("\n=== Consommation ===")
+    print(json.dumps(tracker.summary(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_evaluate(args, settings: Settings) -> int:
-    orchestrator, router, _ = _build(settings, with_kb=args.with_kb)  # sans KB par défaut : baseline reproductible
+    orchestrator, router, _ = _build(settings, with_kb=args.with_kb, team=args.team)  # sans KB par défaut : baseline reproductible
     storage = get_storage(settings)
     report = run_evaluation(orchestrator, router, load_dataset(storage, args.dataset), args.dataset)
     storage.put_json(f"{REPORTS}/{report.run_id}.json", report.model_dump(mode="json"))
@@ -106,11 +136,24 @@ def main(argv: list[str] | None = None) -> int:
     ask.add_argument("--doc", action="append", default=[], metavar="FICHIER", help="Fichier texte à analyser (répétable)")
     ask.set_defaults(func=cmd_ask)
 
+    an = sub.add_parser("analyze", help="Analyse à 5 agents avec débat (preuves, événements, portefeuille, gouvernance)")
+    an.add_argument("question")
+    an.add_argument("--persona", choices=[p.value for p in Persona], default=Persona.BALANCED.value)
+    an.add_argument("--ticker", action="append", default=[], help="Valeur concernée, ex. NVDA (répétable)")
+    an.add_argument("--doc", action="append", default=[], metavar="FICHIER")
+    an.add_argument("--news", metavar="JSON", help="Fichier JSON : liste de NewsItem")
+    an.add_argument("--prices", metavar="JSON", help="Fichier JSON : liste de PricePoint")
+    an.add_argument("--portfolio", metavar="JSON", help="Fichier JSON : Portfolio")
+    an.add_argument("--horizon-years", type=int)
+    an.add_argument("--as-of", type=dt.date.fromisoformat, help="Ignore les preuves postérieures (AAAA-MM-JJ)")
+    an.set_defaults(func=cmd_analyze)
+
     ev = sub.add_parser("evaluate", help="Évalue un dataset (règles + juge LLM)")
     ev.add_argument("--dataset", default="golden_v1")
     ev.add_argument("--mlflow", action="store_true", help="Enregistre le run dans MLflow")
     ev.add_argument("--baseline", action="store_true", help="Compare à la baseline ; code de sortie 1 si régression")
     ev.add_argument("--save-baseline", action="store_true", help="Enregistre ce run comme nouvelle baseline")
+    ev.add_argument("--team", action="store_true", help="Évalue le workflow à 5 agents (ex. --dataset golden_team_v1)")
     ev.add_argument("--with-kb", action="store_true", help="Utilise aussi la Knowledge Base")
     ev.set_defaults(func=cmd_evaluate)
 
