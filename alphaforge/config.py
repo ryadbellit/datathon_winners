@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # Routage : {"tâche": ["fournisseur:model_id", ...]}, dans l'ordre de fallback. Défaut : mock (sans AWS).
     llm_routes: dict[str, list[str]] = {"default": ["mock:mock-model"]}
-    llm_max_tokens: dict[str, int] = {"default": 2048, "orchestration": 4096, "agent": 2048, "evaluation": 600}
+    llm_max_tokens: dict[str, int] = {"default": 2048, "orchestration": 8000, "agent": 6000, "arbitration": 6000, "evaluation": 600}
     # {"model_id": {"input_per_1m": x, "output_per_1m": y}} en USD ; absent = coût inconnu (jamais deviné)
     llm_pricing: dict[str, dict[str, float]] = {}
 
@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     cloudwatch_metrics: bool = False  # métriques EMF sur chaque appel de modèle
     mlflow_tracking_uri: str = "sqlite:///mlflow.db"
     mlflow_experiment: str = "alphaforge"
+    mlflow_tracing: bool = False  # une trace par analyse (contient prompts et réponses : développement uniquement)
 
 
 @lru_cache

@@ -168,7 +168,7 @@ export function Layout() {
           </div>
           <span className="hidden items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs text-ink-2 sm:inline-flex">
             <span className="h-1.5 w-1.5 rounded-full bg-model" aria-hidden="true" />
-            Illustrative data
+            Historical data
           </span>
           <ViewToggle />
           <button type="button" className="focus-ring relative rounded-full p-2 text-ink-2 hover:text-ink" aria-label="Notifications, 1 unread">

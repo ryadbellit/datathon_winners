@@ -117,8 +117,7 @@ class GovernanceAgent(TeamAgent):
                 [],
             )
         payload = {
-            "persona": request.persona.value,
-            "horizon_years": request.horizon_years,
+            **request.profile(),
             "statuts_des_agents": statuses,
             "evidence": [brief(e) for e in evidence],
             "research": {"key_facts": [f.model_dump() for f in research.key_facts], "missing_information": research.missing_information},
@@ -217,6 +216,11 @@ class GovernanceAgent(TeamAgent):
         ]
         profile = data.get("profile_consistency") if isinstance(data.get("profile_consistency"), dict) else {}
         status = profile.get("status") if profile.get("status") in ("yes", "partly", "no", "unknown") else "unknown"
+        checks = {e.check_status for e in evidence if e.kind == "check"}
+        if "fail" in checks:  # un contrôle de profil non respecté interdit de déclarer le profil cohérent
+            status = "no"
+        elif "warn" in checks and status in ("yes", "unknown"):  # les contrôles rendent le profil évaluable
+            status = "partly"
         return GovernanceOutput(
             confidence=AgentOutput(confidence=data.get("confidence", 0.3)).confidence,
             validated_claims=validated,

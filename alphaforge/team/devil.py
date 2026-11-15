@@ -50,7 +50,9 @@ class DevilsAdvocate(TeamAgent):
         "fausses : hypothèses non étayées, causalité affirmée sans preuve, explications alternatives, informations ou risques "
         "oubliés. Construis le meilleur contre-argument raisonnable. Conteste des affirmations précises ; n'invente pas "
         "d'objection pour le principe : si une affirmation est solide, ne la conteste pas (ou en sévérité low). Indique quelles "
-        "preuves confirmeraient ou infirmeraient chaque interprétation."
+        "preuves confirmeraient ou infirmeraient chaque interprétation. Sois sélectif et bref (sinon ta réponse est coupée) : "
+        "au plus 6 challenged_claims, les plus sérieuses d'abord ; au plus 3 éléments dans chacune des autres listes ; "
+        "une ou deux phrases par champ."
     )
     task = "arbitration"
     max_tokens = 6000  # Sonnet 5.5 dépassait 3000 sur des données réelles (JSON tronqué)

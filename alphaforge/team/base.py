@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import re
 from typing import Iterable, Literal
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel, field_validator
 from alphaforge.contracts import AgentResult, TokenUsage
 from alphaforge.llm import LLMError, LLMRequest, LLMResponse
 
+logger = logging.getLogger("alphaforge.team")
 PROMPT_VERSION = "team-v1"
 Status = Literal["ok", "partial", "no_evidence", "skipped", "failed"]
 
@@ -18,7 +20,8 @@ RULES = (
     "Règles : réponds uniquement en JSON valide. Tu ne disposes que des éléments fournis : n'invente ni source, ni chiffre, "
     "ni date. Cite uniquement les identifiants de preuves fournis (E1, E2...). Une coïncidence dans le temps ne prouve pas "
     "une cause. Distingue faits vérifiés, interprétations et scénarios hypothétiques. Aucun conseil d'achat ou de vente. "
-    "Arguments concis : pas de raisonnement interne."
+    "Arguments concis : pas de raisonnement interne. Le profil et le portefeuille fournis sont ceux que l'utilisateur a déclarés "
+    "dans l'application (fictifs, par construction) : tiens-les pour acquis ; seules les données de marché ont une source à citer."
 )
 
 
@@ -30,7 +33,7 @@ class Evidence(BaseModel):
     """Preuve : créée par le code à partir de données réelles (jamais par le LLM). Le LLM ne fait que la citer."""
 
     id: str
-    kind: Literal["news", "price", "document", "knowledge_base"]
+    kind: Literal["news", "price", "metric", "check", "document", "knowledge_base"]  # metric / check : calculés par le code
     claim: str  # observation résumée (par le LLM ; calculée par le code pour les prix)
     source: str
     reference: str  # URL, fichier S3, ticker...
@@ -39,6 +42,7 @@ class Evidence(BaseModel):
     value: float | None = None
     unit: str | None = None
     validation: Literal["verified", "undated"]  # verified = source + date présentes et non postérieures à as_of
+    check_status: Literal["ok", "warn", "fail"] | None = None  # contrôle de profil (kind == "check")
 
 
 class Fact(BaseModel):
@@ -164,16 +168,26 @@ class TeamAgent:
         return self.Output(status="failed", error=error)
 
     def ask(self, schema: str, payload: dict) -> tuple[dict, LLMResponse]:
-        response = self._llm.complete(
-            LLMRequest(
-                task=self.task,
-                agent=self.name,
-                max_tokens=self.max_tokens,
-                system=f"{self.role}\n{RULES}\nFormat de réponse : {schema}",
-                prompt=json.dumps(payload, ensure_ascii=False),
-            )
+        """Appelle le modèle et lit son JSON. Un JSON mal formé (accident du modèle) est redemandé une fois ;
+        une réponse coupée (max_tokens) ne l'est pas : elle serait coupée de nouveau."""
+        request = LLMRequest(
+            task=self.task,
+            agent=self.name,
+            max_tokens=self.max_tokens,
+            system=f"{self.role}\n{RULES}\nFormat de réponse : {schema}",
+            prompt=json.dumps(payload, ensure_ascii=False),
         )
+        response = self._llm.complete(request)
         data = extract_json(response.text)
+        if not data and response.stop_reason != "max_tokens":
+            logger.warning("invalid_json_retry", extra={"event": "invalid_json_retry", "agent": self.name})
+            retry = self._llm.complete(request)
+            costs = (response.estimated_cost_usd, retry.estimated_cost_usd)
+            response = retry.model_copy(update={  # les deux appels sont facturés : on les compte tous les deux
+                "usage": response.usage + retry.usage,
+                "estimated_cost_usd": None if None in costs else sum(costs),
+            })
+            data = extract_json(response.text)
         if not data:
             raise InvalidOutputError(f"{self.name} : sortie JSON illisible (stop_reason={response.stop_reason})")
         return data, response

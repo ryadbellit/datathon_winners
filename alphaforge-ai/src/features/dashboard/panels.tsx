@@ -88,7 +88,7 @@ function advancedOrGuided(c: Check): string {
 export function MetricStrip({ holdings, stats }: { holdings: Holding[]; stats: PortfolioStats }) {
   const mdd = holdings.reduce((s, h) => s + (h.weight / 100) * h.asset.mdd, 0);
   const items = [
-    { label: 'Expected return (illustr.)', value: fmtPct(stats.expReturn), tag: 'model' as const },
+    { label: 'Historical return (ann.)', value: fmtPct(stats.expReturn), tag: 'model' as const },
     { label: 'Volatility', value: fmtPct(stats.vol), tag: 'model' as const },
     { label: 'Max drawdown (approx.)', value: fmtPct(mdd), tag: 'historical' as const },
     { label: 'Rough-year loss', value: fmtPct(stats.p5OneYear), tag: 'model' as const },
@@ -274,7 +274,7 @@ export function FanChartCard({
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-3">
         <ProvenanceTag kind="model" />
         <span className="text-ink-2">{summary}</span>
-        <span>Illustrative scenarios from a simple model. Not a forecast.</span>
+        <span>Projections from a simple model fed with historical returns and volatility. Not a forecast.</span>
       </div>
     </div>
   );
@@ -369,7 +369,7 @@ export function AskPanel({ ctx }: { ctx: AnswerContext | null }) {
           <>
             <p className="text-sm font-semibold text-ink">{answer.question}</p>
             <p className="mt-1 text-sm text-ink-2">{answer.text}</p>
-            <p className="mt-2 text-[11px] text-ink-3">Source: figures on this page, illustrative model.</p>
+            <p className="mt-2 text-[11px] text-ink-3">Source: starter dataset statistics and a simple lognormal model.</p>
           </>
         ) : (
           <p className="text-sm text-ink-3">Answers use only the numbers on this page. Pick a question or type one.</p>

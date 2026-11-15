@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from alphaforge.config import Settings
 from alphaforge.contracts import TokenUsage
+from alphaforge.tracing import span
 
 logger = logging.getLogger("alphaforge.router")
 
@@ -218,6 +219,16 @@ class ModelRouter:
         return (usage.input_tokens * price["input_per_1m"] + usage.output_tokens * price["output_per_1m"]) / 1e6
 
     def complete(self, request: LLMRequest) -> LLMResponse:
+        with span(f"llm:{request.agent or request.task}", "LLM", {"system": request.system, "prompt": request.prompt}, task=request.task) as current:
+            response = self._complete(request)
+            current.outputs(response.text)
+            current.attributes(
+                model_id=response.model_id, input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens,
+                stop_reason=response.stop_reason, latency_ms=response.latency_ms, estimated_cost_usd=response.estimated_cost_usd,
+            )
+            return response
+
+    def _complete(self, request: LLMRequest) -> LLMResponse:
         entries = self._routes.get(request.task) or self._routes.get(TASK_FALLBACKS.get(request.task, "")) or self._routes.get("default")
         if not entries:
             raise NoRouteError(f"Aucune route pour la tâche '{request.task}' et pas de route 'default'")

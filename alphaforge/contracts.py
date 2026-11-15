@@ -5,7 +5,7 @@ import datetime as dt
 import operator
 import uuid
 from enum import Enum
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -44,6 +44,7 @@ class PricePoint(BaseModel):
     date: dt.date
     close: float
     currency: str = "USD"
+    source: str = "données de prix fournies"  # fournisseur réel (ex. "Yahoo Finance") quand il est connu
 
 
 class Holding(BaseModel):
@@ -71,6 +72,13 @@ class AnalysisRequest(BaseModel):
     user_id: str | None = None  # permet de charger le portefeuille via PortfolioProvider
     horizon_years: int | None = None
     as_of: dt.date | None = None  # les preuves postérieures sont ignorées (pas de look-ahead)
+    esg_preference: Literal["none", "aware", "strong"] = "none"  # préférence ESG déclarée par l'investisseur
+    exclusions: list[str] = []  # secteurs, noms ou tickers que l'investisseur veut éviter
+
+    def profile(self) -> dict:
+        """Profil déclaré de l'investisseur, tel que les agents le reçoivent."""
+        return {"persona": self.persona.value, "horizon_years": self.horizon_years,
+                "preference_esg": self.esg_preference, "exclusions": self.exclusions}
 
 
 class AgentResult(BaseModel):

@@ -62,7 +62,7 @@ class EventHunter(TeamAgent):
     Output = EventsOutput
 
     def run(self, question: str, evidence: list[Evidence]) -> tuple[EventsOutput, list[LLMResponse]]:
-        sources = [e for e in evidence if e.kind != "price"]
+        sources = [e for e in evidence if e.kind not in ("price", "metric", "check")]  # des événements, pas des chiffres calculés
         if not sources:  # pas d'actualité ni de document : on le dit, sans appel LLM
             return (
                 EventsOutput(

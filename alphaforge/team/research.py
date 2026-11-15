@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 from collections import defaultdict
 
 from alphaforge.contracts import AnalysisRequest
 from alphaforge.llm import LLMError, LLMResponse
 from alphaforge.retrieval import KnowledgeBase, RetrievalError
+from alphaforge.team.interfaces import ProfileChecks, QuantMetrics
 from alphaforge.team.base import (
     AgentOutput,
     Evidence,
@@ -22,7 +24,14 @@ from alphaforge.team.base import (
 )
 
 logger = logging.getLogger("alphaforge.team")
-MAX_EVIDENCE = 12  # borne le coût en tokens des agents suivants
+MAX_EVIDENCE = 32  # borne le coût en tokens des agents suivants (prix + métriques + contrôles + actualités)
+CHECK_LABEL = {"ok": "respecté", "warn": "attention", "fail": "non respecté"}
+# Sans ticker cité, les métriques ne sont calculées que si la question porte sur le portefeuille ou son risque :
+# une question générale (« c'est quoi un ETF ? ») garde ainsi la réponse rapide en connaissances générales.
+_PORTFOLIO_QUESTION = re.compile(
+    r"portefeuille|portfolio|risqu|risk|diversif|volatil|concentr|perte|pire|worst|drawdown|allocation|répartition|corrél|bêta|beta",
+    re.I,
+)
 SCHEMA = (
     '{"claims": {"E1": "observation en une phrase"}, "key_facts": [{"text": str, "evidence_ids": ["E1"]}], '
     '"missing_information": [str], "confidence": nombre entre 0 et 1}'
@@ -49,9 +58,10 @@ class ResearchAgent(TeamAgent):
     )
     Output = ResearchOutput
 
-    def __init__(self, llm, kb: KnowledgeBase | None = None, market=None):
+    def __init__(self, llm, kb: KnowledgeBase | None = None, market=None, quant: QuantMetrics | None = None,
+                 checker: ProfileChecks | None = None):
         super().__init__(llm)
-        self._kb, self._market = kb, market
+        self._kb, self._market, self._quant, self._checker = kb, market, quant, checker
 
     def gather(self, request: AnalysisRequest) -> tuple[list[Evidence], list[str]]:
         """Collecte déterministe (sans LLM) : KB, documents, actualités, prix. Chaque preuve reçoit son ID ici."""
@@ -65,6 +75,21 @@ class ResearchAgent(TeamAgent):
             except Exception as exc:  # interface externe (autre équipe) : sa panne ne doit pas faire échouer l'analyse
                 logger.warning("market_data_error", extra={"event": "market_data_error", "error_type": type(exc).__name__})
                 missing.append(f"Données de marché indisponibles ({type(exc).__name__}).")
+        metrics, checks = [], []
+        wants_metrics = request.tickers or _PORTFOLIO_QUESTION.search(request.question)
+        has_portfolio = bool(request.portfolio and request.portfolio.holdings)
+        if self._quant and has_portfolio and wants_metrics:
+            try:
+                metrics = self._quant.observations(request.portfolio, request.tickers)
+            except Exception as exc:  # module externe : sa panne ne doit pas faire échouer l'analyse
+                logger.warning("quant_error", extra={"event": "quant_error", "error_type": type(exc).__name__})
+                missing.append(f"Métriques de risque indisponibles ({type(exc).__name__}).")
+        if self._checker and (has_portfolio or request.tickers) and wants_metrics:
+            try:
+                checks = self._checker.checks(request)
+            except Exception as exc:
+                logger.warning("checks_error", extra={"event": "checks_error", "error_type": type(exc).__name__})
+                missing.append(f"Contrôles de profil indisponibles ({type(exc).__name__}).")
         passages = []
         if self._kb:
             try:
@@ -95,8 +120,16 @@ class ResearchAgent(TeamAgent):
                 text = f"{ticker} : clôture {last.close:g} {last.currency} le {last.date}"
                 value, unit = last.close, last.currency
             raw.append(
-                dict(kind="price", claim=text, source="données de prix fournies", reference=ticker, date=last.date, excerpt=text, value=value, unit=unit)
+                dict(kind="price", claim=text, source=last.source, reference=ticker, date=last.date, excerpt=text, value=value, unit=unit)
             )
+        for o in metrics:  # chiffres calculés par le code : citables comme preuves, jamais résumés par le LLM
+            text = f"{o.name} : {o.value:g}{' ' + o.unit if o.unit else ''}"
+            date = dt.date.fromisoformat(o.as_of) if o.as_of else None
+            raw.append(dict(kind="metric", claim=text, source=o.source, reference=o.name, date=date, excerpt=text, value=o.value, unit=o.unit))
+        today = request.as_of or dt.date.today()
+        for c in checks:  # contrôles déterministes du profil : citables et opposables à la gouvernance
+            text = f"Contrôle « {c.rule} » : {CHECK_LABEL[c.status]} — {c.detail}"
+            raw.append(dict(kind="check", claim=text, source=c.source, reference=c.rule, date=today, excerpt=text, check_status=c.status))
         for n in sorted(news, key=lambda n: n.date, reverse=True):
             raw.append(
                 dict(kind="news", claim=n.title, source=n.source, reference=n.url or n.title, date=n.date, excerpt=f"{n.title}. {n.text}"[:600])
@@ -133,7 +166,7 @@ class ResearchAgent(TeamAgent):
 
         claims = data.get("claims") if isinstance(data.get("claims"), dict) else {}
         for e in evidence:
-            if e.kind != "price" and isinstance(claims.get(e.id), str) and claims[e.id].strip():
+            if e.kind not in ("price", "metric", "check") and isinstance(claims.get(e.id), str) and claims[e.id].strip():
                 e.claim = claims[e.id].strip()[:300]
         by_id, facts, dropped = {e.id: e for e in evidence}, [], 0
         for item in dict_items(data, "key_facts"):

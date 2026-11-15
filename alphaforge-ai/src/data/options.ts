@@ -26,7 +26,7 @@ export const ASSET_INTERESTS: Option<AssetInterest>[] = [
   { value: 'other', label: 'Other assets' },
 ];
 
-export const SECTORS = ['Technology', 'Healthcare', 'Consumer', 'Energy', 'Financials'];
+export const SECTORS = ['Technology', 'Healthcare', 'Consumer', 'Energy', 'Financials', 'Industrials', 'Utilities'];
 
 export const REGIONS = ['Global', 'Canada', 'United States', 'Europe', 'Asia', 'Emerging markets'];
 

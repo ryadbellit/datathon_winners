@@ -2,7 +2,7 @@ export type Objective = 'growth' | 'balanced' | 'preservation' | 'income';
 export type Horizon = 'short' | 'medium' | 'long';
 export type Comfort = 'stability' | 'ups-downs' | 'fluctuations';
 export type AssetInterest = 'stock' | 'etf' | 'bond' | 'other';
-export type AssetType = Exclude<AssetInterest, 'other'>;
+export type AssetType = AssetInterest; // 'other' = gold and crypto
 export type Knowledge = 'beginner' | 'intermediate' | 'advanced';
 export type EsgPref = 'none' | 'aware' | 'strong';
 export type ViewMode = 'guided' | 'advanced';
@@ -32,25 +32,28 @@ export interface Asset {
   role: string;
   why: string;
   limitation: string;
-  /** Illustrative annual expected return, percent. */
+  /** Historical annualised return over the dataset window, percent (past, not expected). */
   expReturn: number;
-  /** Illustrative annual volatility, percent. */
+  /** Historical return over the last 12 months, percent. */
+  return1y: number;
+  /** Historical annualised volatility over the dataset window, percent. */
   vol: number;
-  /** Illustrative maximum drawdown, percent (negative). */
+  /** Historical maximum drawdown over the dataset window, percent (negative). */
   mdd: number;
-  /** Expense ratio, percent, or null for individual stocks. */
+  /** Expense ratio, percent, or null when not available. */
   expense: number | null;
   /** Base weight in the proposed mix, percent. */
   baseWeight: number;
-  /** Minutes since the example data was "updated". */
-  updatedMinutesAgo: number;
 }
 
 export interface Scenario {
   id: string;
   name: string;
   description: string;
-  /** Assumed move per ticker, percent (hypothetical). */
+  /** Historical window replayed (YYYY-MM-DD). */
+  start: string;
+  end: string;
+  /** Actual move per ticker over the window, percent (USD, adjusted). */
   moves: Record<string, number>;
   explanation: string;
 }

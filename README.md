@@ -1,44 +1,117 @@
 # AlphaForge AI
 
-Orchestrateur multi-agents (LangGraph) : trois agents analysent une question financière en parallèle (documents, sentiment,
-risque selon le persona Prudent / Équilibré / Audacieux), puis un modèle synthétise. Les appels passent par un `ModelRouter` :
-**Amazon Bedrock** ou un **mock local** (sans AWS). L'équipe de 5 agents (`analyze`) ajoute un débat contradictoire et un verdict fondé sur les preuves. Ce dépôt ne contient ni frontend, ni calculs financiers, ni modèles ML.
+Assistant agentique **auto-explicatif** pour éclairer une décision d'investissement selon le profil de l'investisseur
+(Datathon PolyFinances 2026). Une équipe de 6 agents (LangGraph, **Amazon Bedrock**) analyse une question sur un
+portefeuille fictif, débat de ses propres conclusions et ne rend que ce que les preuves permettent d'affirmer.
+Simulation uniquement : aucune transaction, aucun conseil financier personnalisé.
+
+**Démo en ligne : https://d21ksxcxsl84gd.cloudfront.net** — sur l'accueil, « Or try a reference persona » charge Amira, Mateo ou Robert.
+
+![Vue d'ensemble](docs/diagrams/architecture-simple.svg)
+
+Architecture détaillée : [`docs/diagrams/architecture-technique.svg`](docs/diagrams/architecture-technique.svg)
+(régénérer les schémas : `python docs/diagrams/build_diagrams.py`).
 
 ```
-question + persona
-   ├─ document_analyst ─┐  (Knowledge Base)
-   ├─ sentiment ────────┼─► synthèse (+ Guardrail) ─► réponse, sources, tokens, coût
-   └─ risk_explainer ───┘  (Knowledge Base)
-chaque appel : ModelRouter ─► tâche (agent | orchestration | evaluation) ─► modèle, avec fallback
+question + profil + portefeuille (interface React)
+   └─► API Flask (/api/analyze/stream)
+         └─► Recherche : actualités, prix, métriques de risque, contrôles du profil  ──►  preuves E1, E2… (créées par le code)
+               ├─ Événements ─┐
+               ├─ Storyteller ┼─► Avocat du diable ─► réponses (tour 2) ─► Gouvernance ─► Synthèse (+ Guardrail)
+               └─ Complotiste ┘
 ```
 
-| Fichier (`alphaforge/`) | Rôle |
+| Agent | Rôle | Modèle |
+|---|---|---|
+| Recherche (`team/research.py`) | Rassemble et date les preuves ; aucun chiffre n'est produit par un LLM | Haiku |
+| Événements (`team/events.py`) | Repère et date les événements dans les actualités | Haiku |
+| Storyteller (`team/portfolio.py`) | Explique l'impact sur **ce** portefeuille, en mots simples | Haiku |
+| Complotiste (`team/conspiracy.py`) | Test de robustesse : théories délibérément paranoïaques, toujours « non prouvées » | Haiku |
+| Avocat du diable (`team/devil.py`) | Conteste les conclusions ; les agents visés répondent au tour 2 | Sonnet |
+| Gouvernance (`team/governance.py`) | Valide ou rejette chaque affirmation, vérifie le profil, plafonne le verdict | Sonnet |
+| Synthèse (`team/graph.py`) | Réponse finale en 6 sections, chaque chiffre cité `[E…]` | Sonnet + Guardrail |
+
+Sans aucune donnée pertinente (ex. « c'est quoi un ETF ? »), un seul appel répond en connaissances générales, signalé comme non vérifié.
+
+## Démarrage
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r <(python -c "import tomllib;d=tomllib.load(open('server/pyproject.toml','rb'));print('\n'.join(d['project']['dependencies']+['pytest>=8']))")
+cp .env.example .env                                   # puis renseigner les routes Bedrock et les ressources AWS
+mkdir -p data/starter && cp ../alphaforge_starter/*.csv data/starter/   # jeu de départ PolyFinances (non versionné)
+.venv/bin/python -m alphaforge upload-datasets         # envoie data/datasets et data/starter vers S3 (si STORAGE_BACKEND=s3)
+.venv/bin/python -m server.src.risk.build_front_data   # recalcule alphaforge-ai/src/data/universe.json (statistiques réelles)
+.venv/bin/flask --app server.src.main run --port 5000  # API
+cd alphaforge-ai && npm install && npm run dev         # interface sur http://localhost:5173 (proxy /api -> :5000)
+.venv/bin/python -m pytest -q                          # tests (aucun appel AWS)
+```
+
+Sur la page d'accueil, **« Or try a reference persona »** charge Amira, Mateo ou Robert (profil + portefeuille fictif + question type).
+
+## Déploiement en ligne
+
+```bash
+python deploy/deploy.py   # image Docker (ARM64) -> ECR, puis pile CloudFormation deploy/alphaforge.yaml ; affiche l'adresse HTTPS
+```
+
+Navigateur → **CloudFront** (HTTPS) → **Application Load Balancer** (joignable seulement par CloudFront) → **ECS Fargate**
+(un conteneur : interface compilée + API gunicorn) → Bedrock, Guardrail, S3, CloudWatch avec le **rôle IAM de la tâche**.
+Aucun identifiant dans l'image ni dans la pile : seule la configuration non secrète du `.env` est transmise. Le flux SSE
+envoie un battement toutes les 15 s (délai CloudFront de 60 s) ; `ANALYSES_PER_HOUR` (60 par défaut) plafonne le coût Bedrock
+du site public, en plus de la limite de 10 analyses par minute et par IP. Redéployer après un changement : relancer la commande.
+
+## Services AWS
+
+| Service | Usage dans le flux |
 |---|---|
-| `contracts.py` | Formats de données Pydantic et State LangGraph |
-| `orchestrator.py`, `agents.py` | Le graphe, et les 3 agents (squelettes, sans calcul financier) |
-| `llm.py` | Interface fournisseur, Mock, Bedrock (API Converse), `ModelRouter` (fallback, coût, guardrail) |
-| `retrieval.py` | Recherche dans la Knowledge Base Bedrock |
-| `storage.py` | Stockage local ou S3 (datasets, rapports, baselines) |
-| `observability.py` | Logs JSON (CloudWatch), métriques, suivi des tokens et du coût |
-| `evaluation.py` | Règles + juge LLM, détection de régression, MLflow |
-| `config.py`, `cli.py` | Configuration (`.env`) et commandes |
-| `team/` | **Workflow à 5 agents avec débat** (preuves, événements, portefeuille, avocat du diable, gouvernance) : voir [`alphaforge/team/README.md`](alphaforge/team/README.md) |
+| Amazon Bedrock (Converse) | Les 7 rôles LLM ; routage par tâche avec repli (`LLM_ROUTES`), coût par appel (`LLM_PRICING`) |
+| Bedrock Guardrails | Appliqué à la synthèse et aux réponses générales (sujet refusé : promesses de gains garantis) |
+| Amazon S3 | Jeu de départ (`starter/`), jeux d'évaluation, **archive de chaque analyse** (`reports/analyses/<request_id>.json`) |
+| Amazon CloudWatch | Logs JSON (`/alphaforge/app`) et métriques EMF de chaque appel de modèle |
+| Bedrock Knowledge Base | Branchée par `KNOWLEDGE_BASE_ID` ; désactivée tant qu'elle ne contient que le document d'exemple fictif |
 
-## Application (API + interface)
+## Sources de données
 
-```powershell
-pip install -e ".[dev]"
-flask --app server.src.main run --port 5000        # API : POST /api/analyze, GET /api/health (MARKET_DATA=yahoo pour de vraies actualités/prix)
-cd alphaforge-ai; npm install; npm run dev        # interface (proxy /api -> :5000) ; le chat de « Scenario analysis » interroge les 5 agents
-```
-`server/src/main.py` traduit profil + portefeuille du front en `AnalysisRequest` ; sans API joignable, le chat retombe sur la réponse simulée locale.
+Chaque chiffre de l'analyse est une **preuve** (`E1`, `E2`…) créée par le code, avec sa source et sa date ; les agents ne font que la citer.
 
-## Installation
+| Preuve | Source | Détail |
+|---|---|---|
+| `metric` | **Jeu de départ PolyFinances** (cours ajustés Yahoo Finance, 2021-11-12 → 2026-11-12 ; USD/CAD Banque du Canada) ; Yahoo en direct pour un actif hors univers | Volatilité, VaR / CVaR historiques 95 %, baisse maximale, bêta vs S&P 500 (SPY), part du risque par ligne, nombre effectif de lignes, corrélation moyenne (1 an) ; prévision GARCH + Monte Carlo (historique complet) ; **simulation « et si »** d'un actif cité mais non détenu (poids 10 %) ; taux et inflation (Banque du Canada, FRED) si le portefeuille contient des obligations |
+| `check` | Règles AlphaForge (ci-dessous) sur le jeu de départ | Contrôles déterministes du profil |
+| `price` | Yahoo Finance en direct | 10 dernières séances des actifs cités |
+| `news` | Éditeur d'origine via Yahoo Finance (ex. « Motley Fool (via Yahoo Finance) ») | 5 articles au plus par actif cité |
 
-```powershell
-pip install -e .
-copy .env.example .env      # puis éditez .env
-```
+- L'interface affiche les **statistiques réelles** des 31 actifs du jeu de départ (rendement annualisé, volatilité, baisse maximale,
+  corrélations) et des **rejeux historiques** (2022, pire et meilleur mois du S&P 500, 2023, 12 derniers mois) au lieu de scénarios inventés.
+- Traitements : rendements sur `adj_close` ; CAD convertis au taux de la Banque du Canada (dernier taux reporté les jours fériés) ;
+  calendriers alignés sur les jours communs (mouvements crypto du week-end reportés au lundi) ; IPC daté du mois de référence, pas de publication.
+- Limites : biais du survivant (univers choisi en 2026) ; aucune note ESG dans les données (l'ESG est traité par secteur) ;
+  mesures du passé, pas des promesses.
+
+## Contrôles de profil (`server/src/risk/checks.py`)
+
+Règles déterministes, visibles dans le chat (✓ / ⚠ / ✗) et opposables à la gouvernance : un contrôle « non respecté » interdit
+de déclarer le profil cohérent. Les seuils sont des **hypothèses de conception** documentées ici.
+
+| Contrôle | Prudent | Équilibré | Audacieux |
+|---|---|---|---|
+| Volatilité annuelle du portefeuille (⚠ au-delà, ✗ au-delà de 1,5×) | 8 % | 12 % | 18 % |
+| Poids d'une seule action ou crypto | 20 % | 25 % | 35 % |
+| Concentration sectorielle (actions individuelles) | 40 % | 50 % | 60 % |
+| Cryptoactifs (✗ si interdit) | 0 % | 5 % | 10 % |
+| Volatilité d'un actif demandé mais non détenu | 25 % | 35 % | — |
+| Nombre effectif de lignes (tous profils) | ≥ 3 | ≥ 3 | ≥ 3 |
+
+Plus : horizon ≤ 5 ans et actif demandé à plus de 30 % de volatilité (⚠) ; préférence ESG et exposition au secteur Énergie
+(⚠ « ESG-aware », ✗ « strong ») ; exclusions déclarées (✗). Personas de l'énoncé testés dans `tests/test_personas.py`.
+
+## Voir le raisonnement des agents
+
+- **Dans le chat** (*Scenario Analysis*) : graphe des agents en direct, contrôles de profil, réponse citée `[E…]`.
+- **Page Debug** : bouton 🐛 en haut de la réponse, ou `/debug` (sortie de chaque agent, débat, preuves).
+- **MLflow** (`MLFLOW_TRACING=true`, puis `mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001`) : prompt, réponse brute,
+  modèle et tokens de chaque appel.
+- **S3** : rapport complet de chaque analyse archivé (`reports/analyses/`).
 
 ## Utilisation
 
@@ -62,7 +135,7 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `LLM_ROUTES` | mock | `{"tâche": ["fournisseur:model_id", ...]}`, fallback dans l'ordre ; tâches `orchestration`, `agent`, `evaluation`, `arbitration` (avocat du diable + gouvernance ; sans route : reprend `orchestration`, **sans Guardrail**), `default` ; fournisseurs `mock`, `bedrock` |
-| `LLM_MAX_TOKENS` | 2048 / 4096 / 2048 / 600 | Limite de sortie par tâche (trop bas = réponses tronquées, événement `truncated`) |
+| `LLM_MAX_TOKENS` | 2048 / 8000 / 6000 / 6000 / 600 | Limite de sortie par tâche (trop bas = réponses tronquées, événement `truncated`) |
 | `LLM_PRICING` | `{}` | `{"model_id": {"input_per_1m": x, "output_per_1m": y}}` en USD ; vide = coût « inconnu » |
 | `AWS_REGION` / `AWS_PROFILE` | `us-east-1` / vide | Région ; profil local (sinon chaîne par défaut de boto3 : rôle IAM, variables) |
 | `BEDROCK_TIMEOUT_SECONDS`, `BEDROCK_MAX_RETRIES` | `60`, `3` | Délai et nouvelles tentatives |
@@ -72,6 +145,7 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 | `S3_BUCKET`, `S3_PREFIX` | vide, `alphaforge` | Bucket S3 |
 | `CLOUDWATCH_LOG_GROUP`, `CLOUDWATCH_RETENTION_DAYS`, `CLOUDWATCH_METRICS` | vide, `14`, `false` | Logs et métriques (EMF) vers CloudWatch |
 | `LOG_LEVEL`, `MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT` | `INFO`, `sqlite:///mlflow.db`, `alphaforge` | |
+| `MLFLOW_TRACING` | `false` | Une trace par analyse : span par agent et par appel de modèle (onglet **Traces** de `mlflow ui`). Contient prompts et réponses : développement uniquement |
 
 Ne jamais mettre d'identifiants dans le code ; le `.env` est ignoré par git. Les jetons d'atelier expirent (`ExpiredToken` : les recopier).
 Sous Git Bash, ne pas exporter `/alphaforge/app` en variable d'environnement (converti en chemin Windows) : le mettre dans le `.env`.
@@ -108,9 +182,13 @@ c'est le rôle d'exécution qui écrit.
 
 ## Limites connues
 
-- Les IDs de modèles sont à vérifier sur votre compte (`check-routes`) : tous les modèles Bedrock ne sont pas forcément activés.
-- 4 cas d'évaluation seulement ; le juge est stochastique (±0,25 observé) ; la baseline dépend des modèles utilisés.
-- Les 3 agents de `ask` sont des squelettes. L'équipe de 5 agents n'a pas de source de données réelle (interfaces `team/interfaces.py` à brancher) et pas de MLflow Tracing.
-- Pas d'API ni de frontend.
-- Le `Dockerfile` (ECS Fargate) est fourni mais jamais construit ni déployé.
-- Tests : `tests/test_team.py` couvre l'équipe de 5 agents (fournisseur scripté). Le reste se vérifie avec `check-routes`, `ask` et `evaluate`.
+- Une analyse complète prend environ 100 s (3 rôles sur Sonnet) et coûte environ 0,17 $ ; le graphe en direct rend l'attente visible.
+- Le verdict de la gouvernance varie d'une exécution à l'autre (modèle stochastique) ; les contrôles de profil, eux, sont déterministes.
+- Aucune note ESG dans les données : l'ESG est évalué par l'exposition sectorielle (Énergie), ce que l'application dit explicitement.
+- Les identifiants AWS d'atelier expirent (`ExpiredToken`) : les recopier dans le `.env`. Sans S3, le jeu de départ est lu dans `./data/starter`.
+- Les 3 agents de la commande `ask` (premier prototype, hors application) sont des squelettes.
+- En ligne, une seule tâche ECS (limites de débit en mémoire) : pas de mise à l'échelle horizontale.
+- Yahoo Finance peut limiter les requêtes venant d'adresses cloud : les actualités peuvent alors manquer (signalé dans la réponse) ;
+  les métriques, elles, viennent du jeu de départ sur S3.
+- Tests : `tests/test_team.py` (6 agents, fournisseur scripté), `tests/test_risk.py` (calculs), `tests/test_personas.py`
+  (Amira, Mateo, Robert sur les vraies données), `tests/test_server.py` (API et flux SSE).

@@ -58,7 +58,7 @@ export function ScenarioPage() {
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-3">Scenario analysis</p>
           <h1 className="text-xl font-semibold text-ink">Explore "what if" market conditions</h1>
-          <p className="text-xs text-ink-2">Scenarios are hypothetical learning tools, not forecasts, probabilities, or guarantees.</p>
+          <p className="text-xs text-ink-2">Scenarios replay what each asset actually did over past windows. Past moves are not forecasts, probabilities, or guarantees.</p>
         </div>
         <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => navigate('/')}>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -198,7 +198,7 @@ function ScenarioSummary({
           <FlaskConical className="h-4 w-4 text-model" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Hypothetical scenario</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Historical replay</p>
           <p className="truncate text-base font-semibold text-ink">{scenarioName}</p>
         </div>
       </div>
@@ -213,7 +213,7 @@ function ScenarioSummary({
             {fmtUSD(CAPITAL)} could become about {fmtUSD(result.endValue)}. The actual result could be better or worse.
           </p>
           <div className="mt-1.5">
-            <ProvenanceTag kind="hypothetical" />
+            <ProvenanceTag kind="historical" />
           </div>
         </div>
         <div className="flex flex-col gap-1 text-xs">
@@ -277,7 +277,7 @@ function Contributions({
         );
       })}
       <div className="mt-1">
-        <ProvenanceTag kind="hypothetical" />
+        <ProvenanceTag kind="historical" />
       </div>
     </div>
   );

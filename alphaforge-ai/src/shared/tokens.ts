@@ -24,6 +24,7 @@ export const assetClassColors = {
   Stocks: colors.dataSlate,
   ETFs: colors.success,
   Bonds: colors.model,
+  Other: colors.caution,
 } as const;
 
 /**

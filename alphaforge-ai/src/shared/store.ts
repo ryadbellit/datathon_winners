@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { ASSETS, SCENARIOS } from '../data/assets';
+import type { Persona } from '../data/personas';
 import type { Profile, ViewMode } from '../data/types';
 
 interface Toast {
@@ -16,8 +17,11 @@ interface AppState {
   scenarioId: string;
   horizonOverride: number | null;
   toast: Toast | null;
+  /** Question proposed in the chat after loading a persona. */
+  suggestedQuestion: string;
 
   saveProfile: (profile: Profile, initialSelection: string[]) => void;
+  loadPersona: (persona: Persona) => void;
   toggleAsset: (ticker: string) => void;
   clearSelection: () => void;
   setWeight: (ticker: string, value: number) => void;
@@ -66,6 +70,7 @@ export const useAppStore = create<AppState>()(
       scenarioId: SCENARIOS[0].id,
       horizonOverride: null,
       toast: null,
+      suggestedQuestion: '',
 
       saveProfile: (profile, initialSelection) =>
         set({
@@ -75,6 +80,18 @@ export const useAppStore = create<AppState>()(
           viewMode: profile.knowledge === 'advanced' ? 'advanced' : 'guided',
           horizonOverride: null,
         }),
+
+      loadPersona: (persona) => {
+        set({
+          profile: persona.profile,
+          selectedIds: Object.keys(persona.weights),
+          weightOverrides: { ...persona.weights },
+          viewMode: persona.profile.knowledge === 'advanced' ? 'advanced' : 'guided',
+          horizonOverride: null,
+          suggestedQuestion: persona.question,
+        });
+        get().notify(`Loaded the ${persona.name.split(',')[0]} persona`);
+      },
 
       toggleAsset: (ticker) => {
         const { selectedIds } = get();

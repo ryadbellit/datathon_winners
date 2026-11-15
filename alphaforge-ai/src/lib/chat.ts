@@ -31,11 +31,10 @@ const Z_P5 = -1.645;
 const money = (n: number) => fmtUSD(n);
 
 const SCENARIO_KEYWORDS: [RegExp, string][] = [
-  [/tech/, 'tech-downturn'],
-  [/rate|interest|2022/, 'rate-increase'],
-  [/slow|recession|earnings/, 'slowdown'],
-  [/rall|strong|bull|boom|rise|rising/, 'strong-global'],
-  [/crash|decline|broad|market|fall/, 'broad-decline'],
+  [/tech|rate|interest|2022|inflation/, 'year-2022'],
+  [/slow|recession|earnings|crash|decline|broad|market|fall|worst/, 'worst-month'],
+  [/rall|strong|bull|boom|rise|rising|rebound|2023/, 'year-2023'],
+  [/last year|12 months|recent/, 'last-12m'],
 ];
 
 const HELP =

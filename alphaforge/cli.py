@@ -14,6 +14,7 @@ from alphaforge.llm import LLMError, LLMRequest, ModelRouter
 from alphaforge.observability import UsageTracker, model_call_logger, setup_logging
 from alphaforge.orchestrator import Orchestrator
 from alphaforge.retrieval import KnowledgeBase
+from alphaforge.starter import STARTER
 from alphaforge.storage import BASELINES, DATASETS, REPORTS, LocalStorage, StorageNotFoundError, get_storage
 from alphaforge.team import TeamOrchestrator
 
@@ -116,9 +117,9 @@ def cmd_check_routes(args, settings: Settings) -> int:
 
 
 def cmd_upload_datasets(args, settings: Settings) -> int:
-    """Copie ./data/datasets vers le stockage configuré (ex. S3)."""
+    """Copie ./data/datasets (évaluation) et ./data/starter (jeu de départ PolyFinances) vers le stockage configuré (ex. S3)."""
     source, target = LocalStorage(args.source), get_storage(settings)
-    keys = source.list(f"{DATASETS}/")
+    keys = [k for prefix in (DATASETS, STARTER) for k in source.list(f"{prefix}/")]
     for key in keys:
         target.put_bytes(key, source.get_bytes(key))
         print(f"envoyé : {key}")
@@ -159,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("check-routes", help="Teste chaque modèle configuré").set_defaults(func=cmd_check_routes)
 
-    up = sub.add_parser("upload-datasets", help="Envoie ./data/datasets vers le stockage configuré")
+    up = sub.add_parser("upload-datasets", help="Envoie ./data/datasets et ./data/starter vers le stockage configuré")
     up.add_argument("--source", default="data", help="Dossier local source (défaut : data)")
     up.set_defaults(func=cmd_upload_datasets)
 

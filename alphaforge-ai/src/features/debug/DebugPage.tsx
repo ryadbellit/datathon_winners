@@ -26,9 +26,8 @@ export function DebugPage() {
     if (reportJson) {
       try {
         setReport(JSON.parse(reportJson));
-      } catch (e) {
-        console.error('Failed to parse debug report:', e);
-        setReport(null);
+      } catch {
+        setReport(null); // stored report unreadable: the page shows the empty state
       }
     }
   }, []);
@@ -55,19 +54,6 @@ export function DebugPage() {
       </div>
     );
   }
-
-  // Debug: Log what we have to help troubleshoot
-  console.log('Debug report loaded:', {
-    hasReport: !!report,
-    hasEvidence: !!report?.evidence,
-    hasResearch: !!report?.research,
-    hasEvents: !!report?.events,
-    hasPortfolio: !!report?.portfolio,
-    hasConspiracy: !!report?.conspiracy,
-    hasDevil: !!report?.devil,
-    hasGovernance: !!report?.governance,
-    reportKeys: report ? Object.keys(report) : [],
-  });
 
   const agentData = {
     research: report.research,
