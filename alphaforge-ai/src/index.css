@@ -1,0 +1,206 @@
+@import "tailwindcss";
+
+/* Design tokens. Mirrored in src/shared/tokens.ts for charts. Dark theme by default. */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-page: #0e0f12;
+  --color-surface: #16181d;
+  --color-raised: #1d2027;
+  --color-line: #2a2e37;
+  --color-line-strong: #3a4050;
+  --color-ink: #f5f6f8;
+  --color-ink-2: #a6acb8;
+  --color-ink-3: #7a8190;
+  --color-brand: #e1251b;
+  --color-brand-hover: #ec4438;
+  --color-data-slate: #6c8cbf;
+  --color-success: #3fb68b;
+  --color-caution: #f2b04a;
+  --color-model: #9b87f5;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+/* The app fits the window: the page itself never scrolls. Scrolling happens only inside panels that opt in. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere. */
+.focus-ring:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[role="slider"]:focus-visible {
+  outline: 2px solid var(--color-brand-hover);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  background: var(--color-brand);
+  color: #fff;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  transition: background-color 200ms ease;
+}
+.btn-primary:hover {
+  background: var(--color-brand-hover);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--color-line-strong);
+  background: transparent;
+  color: var(--color-ink);
+  padding: 0.6rem 1.1rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: background-color 200ms ease;
+}
+.btn-secondary:hover {
+  background: var(--color-raised);
+}
+
+.btn-outline-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--color-brand);
+  color: var(--color-ink);
+  padding: 0.55rem 0.9rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: background-color 200ms ease;
+}
+.btn-outline-brand:hover {
+  background: rgba(225, 37, 27, 0.12);
+}
+
+/* Show a pointer on anything clickable, so it is clear that a click leads somewhere. */
+button,
+[role="button"],
+[role="tab"],
+[role="checkbox"],
+[role="radio"],
+select,
+summary {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Slider styling for weights and scenario sliders. */
+input[type="range"] {
+  accent-color: var(--color-brand);
+  width: 100%;
+}
+
+/* Respect reduced motion: shorten or remove animations and transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Print / PDF: show only the report, every section, on plain pages. */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  html,
+  body,
+  #root,
+  #root > div {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  aside,
+  header.sticky,
+  .no-print,
+  .toast,
+  [role="status"][aria-live] {
+    display: none !important;
+  }
+  .report-scroll,
+  .report-scroll > div {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  #analysis-report {
+    position: static !important;
+    display: block !important;
+  }
+  #analysis-report header,
+  #analysis-report .report-section,
+  #analysis-report .report-section * {
+    color: #000 !important;
+  }
+  .report-section {
+    display: block !important;
+    break-inside: avoid;
+    border-color: #ccc !important;
+    background: #fff !important;
+    margin-bottom: 12px;
+  }
+  .report-section * {
+    background-color: transparent !important;
+  }
+}
+
+/* Step transition used by the onboarding flow. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.step-enter {
+  animation: step-in 220ms ease-out;
+}
