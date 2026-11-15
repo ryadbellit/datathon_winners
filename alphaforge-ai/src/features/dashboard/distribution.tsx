@@ -6,10 +6,11 @@ import { fmtUSD, fmtWeight } from '../../shared/format';
 import { assetClassColors, holdingPalette } from '../../shared/tokens';
 import { CAPITAL, type Holding } from '../../lib/engine';
 
-const CLASS_LABEL: Record<Asset['type'], 'Stocks' | 'ETFs' | 'Bonds'> = {
+const CLASS_LABEL: Record<Asset['type'], keyof typeof assetClassColors> = {
   stock: 'Stocks',
   etf: 'ETFs',
   bond: 'Bonds',
+  other: 'Other',
 };
 
 interface Slice {

@@ -28,7 +28,7 @@ function diversificationNote(a: Asset): string {
 function fitIssue(a: Asset, p: Profile): string | null {
   const rules = COMFORT_RULES[p.comfort];
   if (a.vol > rules.riskFitCeiling) {
-    return `${a.ticker}'s illustrative volatility (${fmtPct(a.vol)}) is above the usual range for your risk comfort (up to ${rules.riskFitCeiling}%).`;
+    return `${a.ticker}'s historical volatility (${fmtPct(a.vol)}) is above the usual range for your risk comfort (up to ${rules.riskFitCeiling}%).`;
   }
   if (a.type === 'stock' && a.vol > 30 && (p.comfort === 'stability' || p.horizon === 'short')) {
     return `${a.ticker} is a higher-movement stock, usually better suited to a longer horizon and higher risk comfort.`;
@@ -63,7 +63,7 @@ export function ComparePage() {
     { label: 'What it offers', value: (a) => a.role },
     {
       label: 'Risk level',
-      help: 'Based on illustrative volatility: Low below 10%, Medium below 25%, High above that.',
+      help: 'Based on historical volatility over the dataset window: Low below 10%, Medium below 25%, High above that.',
       value: (a) => riskLevel(a.vol),
     },
     { label: 'Main benefit', value: (a) => a.why },
@@ -177,7 +177,7 @@ export function ComparePage() {
             <p className="text-sm font-semibold text-ink">Strongest diversification contribution</p>
             <p className="text-xs text-ink-2">
               {lowestRiskNonStock
-                ? `${lowestRiskNonStock.ticker} has the lowest illustrative volatility of the non-stock assets you chose (${fmtPct(lowestRiskNonStock.vol)}). It still carries risk.`
+                ? `${lowestRiskNonStock.ticker} has the lowest historical volatility of the non-stock assets you chose (${fmtPct(lowestRiskNonStock.vol)}). It still carries risk.`
                 : 'No bond or lower-volatility asset is selected to compare.'}
             </p>
           </div>

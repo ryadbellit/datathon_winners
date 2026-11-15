@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Info, Search } from 'lucide-react';
-import { ASSETS } from '../../data/assets';
+import { ASSETS, DATA_AS_OF, DATA_START } from '../../data/assets';
 import { ASSET_INTERESTS, COMFORTS, HORIZONS, KNOWLEDGE, OBJECTIVES } from '../../data/options';
 import type { Asset, AssetType, Profile } from '../../data/types';
 import { useAppStore } from '../../shared/store';
-import { assetClassColors, colors } from '../../shared/tokens';
-import { fmtMinutesAgo, fmtPct, fmtUSD } from '../../shared/format';
+import { colors } from '../../shared/tokens';
+import { fmtPct, fmtUSD } from '../../shared/format';
 import { Card, Chip, Drawer, EmptyState, ProvenanceTag } from '../../shared/ui';
 import {
   COMFORT_RULES,
@@ -24,8 +24,7 @@ type TypeFilter = 'all' | AssetType;
 type Sort = 'fit' | 'volatility' | 'return';
 type Status = 'in' | 'flags' | 'clear' | 'pending';
 
-const TYPE_LABEL: Record<AssetType, string> = { stock: 'Stocks', etf: 'ETFs', bond: 'Bonds' };
-const CLASS_OF: Record<AssetType, keyof typeof assetClassColors> = { stock: 'Stocks', etf: 'ETFs', bond: 'Bonds' };
+const TYPE_LABEL: Record<AssetType, string> = { stock: 'Stocks', etf: 'ETFs', bond: 'Bonds', other: 'Gold & crypto' };
 
 interface Delta {
   median: number;
@@ -224,7 +223,7 @@ export function DiscoverPage() {
                     >
                       <option value="fit">Fit to profile</option>
                       <option value="volatility">Lowest volatility</option>
-                      <option value="return">Illustrative return</option>
+                      <option value="return">Historical return</option>
                     </select>
                   )}
                 </div>
@@ -265,7 +264,7 @@ export function DiscoverPage() {
         </div>
       </div>
 
-      <p className="mt-3 text-xs text-ink-3">Example data only. Simulation only. Not financial advice.</p>
+      <p className="mt-3 text-xs text-ink-3">Historical data from the PolyFinances starter dataset. Past results do not predict future results. Simulation only. Not financial advice.</p>
 
       <WhyDrawer open={whyOpen} onClose={() => setWhyOpen(false)} profile={profile} />
     </div>
@@ -435,8 +434,8 @@ function AssetDetail({
             </ResponsiveContainer>
           </div>
           <p className="mt-1 flex items-center gap-1.5 text-[10px] text-ink-3">
-            <ProvenanceTag kind="hypothetical" />
-            Example data · {asset.typeLabel} · updated {fmtMinutesAgo(asset.updatedMinutesAgo)}
+            <ProvenanceTag kind="historical" />
+            Historical data · {asset.typeLabel} · {DATA_START} to {DATA_AS_OF}
           </p>
         </div>
 

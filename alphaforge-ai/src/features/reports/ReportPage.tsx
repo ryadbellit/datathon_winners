@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, FileText } from 'lucide-react';
-import { ASSETS, SCENARIOS } from '../../data/assets';
+import { ASSETS, DATA_AS_OF, DATA_START, SCENARIOS } from '../../data/assets';
 import { ASSET_INTERESTS, COMFORTS, HORIZONS, KNOWLEDGE, OBJECTIVES } from '../../data/options';
 import type { Asset, Profile } from '../../data/types';
 import { useAppStore } from '../../shared/store';
@@ -91,7 +91,6 @@ export function ReportPage() {
   const regions = Array.from(regionMap, ([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   const techShare = holdings.filter((h) => h.asset.sectors.includes('Technology')).reduce((s, h) => s + h.weight, 0);
   const limitations = Array.from(new Set(holdings.map((h) => h.asset.limitation)));
-  const minutes = holdings.map((h) => h.asset.updatedMinutesAgo);
   const discoveredTypes = {
     stock: discovered.filter((a) => a.type === 'stock').length,
     etf: discovered.filter((a) => a.type === 'etf').length,
@@ -119,7 +118,7 @@ export function ReportPage() {
             </span>
           </p>
           <p className="text-sm text-ink-2">
-            This mix holds {holdings.length} assets. Its illustrative expected return is {fmtPct(stats.expReturn)} a year, with volatility of{' '}
+            This mix holds {holdings.length} assets. Its historical annualised return is {fmtPct(stats.expReturn)} a year, with volatility of{' '}
             {fmtPct(stats.vol)}. In a rough year, the model's 5th-percentile return is {fmtPct(stats.p5OneYear)}, against your{' '}
             {fmtPct(roughYearLimit, { dp: 0 })} limit.
           </p>
@@ -129,7 +128,7 @@ export function ReportPage() {
             <Stat label="Expected return" value={fmtPct(stats.expReturn)} />
             <Stat label="Volatility" value={fmtPct(stats.vol)} />
           </div>
-          <p className="text-xs text-ink-3">Simulation with invented example data. Not financial advice.</p>
+          <p className="text-xs text-ink-3">Simulation on historical data (PolyFinances starter dataset). Not financial advice.</p>
         </div>
       ),
     },
@@ -245,7 +244,7 @@ export function ReportPage() {
       body: (
         <div className="grid gap-6 lg:grid-cols-2">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Market scenarios (hypothetical)</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Historical replays</p>
             <table className="w-full text-left text-xs">
               <caption className="sr-only">Scenario impact on the mix</caption>
               <thead className="text-ink-3">
@@ -293,7 +292,7 @@ export function ReportPage() {
               </tbody>
             </table>
             <p className="mt-2 text-xs text-ink-3">
-              Your selected horizon is {horizonYears} years: typical {fmtUSD(end.median)}, rough {fmtUSD(end.p5)}. Scenarios are hypothetical; horizon figures are model estimates.
+              Your selected horizon is {horizonYears} years: typical {fmtUSD(end.median)}, rough {fmtUSD(end.p5)}. Scenarios replay past windows; horizon figures are model estimates.
             </p>
           </div>
         </div>
@@ -339,12 +338,12 @@ export function ReportPage() {
       body: (
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-line bg-raised p-3 text-sm text-ink-2">
-            <p className="font-semibold text-ink">The figures come from invented example data.</p>
-            <p className="mt-1">They show how the method works. They are not real market measurements, so they can't be checked against outside sources.</p>
+            <p className="font-semibold text-ink">The figures come from the PolyFinances starter dataset.</p>
+            <p className="mt-1">Adjusted closes from Yahoo Finance, CAD converted with the Bank of Canada rate, all in USD. Statistics describe the past window; they are not forecasts.</p>
           </div>
           <dl className="grid gap-2 text-sm md:grid-cols-2">
-            <Row label="Data freshness" value={`Example data, updated ${Math.min(...minutes)} to ${Math.max(...minutes)} min ago`} />
-            <Row label="Completeness" value={`All ${holdings.length} selected assets have full example figures`} />
+            <Row label="Data window" value={`Starter dataset, ${DATA_START} to ${DATA_AS_OF}`} />
+            <Row label="Completeness" value={`All ${holdings.length} selected assets have full historical figures`} />
           </dl>
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Sensitivity to the correlation assumption</p>
@@ -393,7 +392,7 @@ export function ReportPage() {
             <li>Should I keep an emergency fund before investing?</li>
           </ul>
           <div className="mt-auto rounded-xl border border-line bg-raised p-3 text-xs text-ink-3">
-            This report is a simulation built on invented example data. It is not financial advice and not a suitability assessment. A licensed financial advisor can use real data and your full situation.
+            This report is a simulation built on historical data from the starter dataset. It is not financial advice and not a suitability assessment. A licensed financial advisor can use real data and your full situation.
           </div>
         </div>
       ),
@@ -406,7 +405,7 @@ export function ReportPage() {
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-3">Analysis report</p>
           <h1 className="text-xl font-semibold text-ink">Your investment analysis</h1>
-          <p className="text-xs text-ink-2">Prepared {REPORT_DATE} · illustrative data · simulation only</p>
+          <p className="text-xs text-ink-2">Prepared {REPORT_DATE} · historical data · simulation only</p>
         </div>
         <button type="button" onClick={() => window.print()} className="btn-outline-brand no-print px-3 py-1.5 text-sm">
           <FileText className="h-4 w-4" aria-hidden="true" />

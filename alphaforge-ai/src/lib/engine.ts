@@ -1,4 +1,4 @@
-import { ASSETS, SCENARIOS } from '../data/assets';
+import { ASSETS, CORRELATIONS, SCENARIOS } from '../data/assets';
 import type { Asset, AssetInterest, Comfort, Horizon, Profile, Scenario } from '../data/types';
 
 /*
@@ -106,9 +106,9 @@ export function buildHoldings(
 }
 
 export interface PortfolioStats {
-  /** Weighted average of expected returns, percent. */
+  /** Weighted average of historical annualised returns, percent (used as the model's drift, not a promise). */
   expReturn: number;
-  /** Volatility with a constant 0.5 correlation between every pair, percent. */
+  /** Volatility from the historical correlation matrix (0.5 when a pair is missing), percent. */
   vol: number;
   /** 5th percentile one-year return from the lognormal model, percent. */
   p5OneYear: number;
@@ -118,9 +118,12 @@ export function portfolioStats(holdings: Holding[]): PortfolioStats {
   const w = holdings.map((h) => h.weight / 100);
   const expReturn = holdings.reduce((s, h, i) => s + w[i] * h.asset.expReturn, 0);
   const weighted = holdings.map((h, i) => w[i] * h.asset.vol);
-  const sumWeighted = weighted.reduce((s, x) => s + x, 0);
-  const sumSquares = weighted.reduce((s, x) => s + x * x, 0);
-  const variance = 0.5 * sumSquares + 0.5 * sumWeighted * sumWeighted; // in %^2
+  const corr = (a: string, b: string) => (a === b ? 1 : (CORRELATIONS[a]?.[b] ?? 0.5));
+  // w' Σ w with Σ_ij = ρ_ij σ_i σ_j, in %^2
+  const variance = holdings.reduce(
+    (sum, hi, i) => sum + holdings.reduce((inner, hj, j) => inner + weighted[i] * weighted[j] * corr(hi.asset.ticker, hj.asset.ticker), 0),
+    0,
+  );
   const vol = Math.sqrt(Math.max(0, variance));
   const p5OneYear = (Math.exp(logDrift(expReturn, vol) + Z_P5 * (vol / 100)) - 1) * 100;
   return { expReturn, vol, p5OneYear };
@@ -354,7 +357,7 @@ export function buildMix(
 
 /** Inputs for Ask AlphaForge, derived from a mix snapshot. */
 export function buildAskContext(mix: MixSnapshot, profile: Profile, horizonYears: number): AnswerContext {
-  const rate = runScenario(mix.holdings, presetScenarioMove(findScenario('rate-increase')));
+  const rate = runScenario(mix.holdings, presetScenarioMove(findScenario('year-2022')));
   return {
     holdings: mix.holdings,
     stats: mix.stats,
@@ -462,7 +465,7 @@ export function answerFor(q: PresetQuestion, c: AnswerContext): string {
     case 'What is my worst case?':
       return `In the model's 5th percentile year, the mix could return ${c.stats.p5OneYear.toFixed(1)}%, against your ${c.badYearLimit}% limit. Over ${c.horizonYears} years, the 5th percentile outcome is about $${Math.round(c.horizonEndP5 / 100) * 100} and the median about $${Math.round(c.horizonEndMedian / 100) * 100}, starting from a fictive $100,000.`;
     case 'What if 2022 repeats?':
-      return `2022 is not modelled directly. As an illustrative proxy, the Interest rate increase scenario would move this mix ${c.rateScenarioImpact.toFixed(1)}%, about ${c.rateScenarioDollars < 0 ? '-' : '+'}$${Math.abs(Math.round(c.rateScenarioDollars / 100) * 100).toLocaleString('en-US')} on the fictive capital.`;
+      return `Replaying what each holding actually did in 2022, this mix would have moved ${c.rateScenarioImpact.toFixed(1)}%, about ${c.rateScenarioDollars < 0 ? '-' : '+'}$${Math.abs(Math.round(c.rateScenarioDollars / 100) * 100).toLocaleString('en-US')} on the fictive capital. That year stocks and bonds fell together. Past moves, not a forecast.`;
     case 'What drives the risk?': {
       const [x, y] = c.topRisk;
       return y

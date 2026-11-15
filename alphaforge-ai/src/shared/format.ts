@@ -31,8 +31,3 @@ export function fmtNumber(value: number, dp = 1): string {
   return value.toFixed(dp);
 }
 
-export function fmtMinutesAgo(min: number): string {
-  if (!isFiniteNumber(min)) return DASH;
-  if (min < 60) return `${min} min ago`;
-  return `${Math.round(min / 60)} h ago`;
-}
