@@ -1,0 +1,245 @@
+[
+  {
+    "case_id": "team-nvidia-baisse",
+    "question": "Pourquoi l'action NVIDIA a-t-elle baissé et quel impact sur mon portefeuille ?",
+    "persona": "prudent",
+    "tickers": [
+      "NVDA"
+    ],
+    "horizon_years": 5,
+    "as_of": "2025-01-28",
+    "portfolio": {
+      "holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA",
+          "weight_pct": 35,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "AMD",
+          "weight_pct": 15,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "MSFT",
+          "weight_pct": 20,
+          "sector": "Logiciels"
+        },
+        {
+          "ticker": "BND",
+          "weight_pct": 30,
+          "sector": "Obligations"
+        }
+      ]
+    },
+    "prices": [
+      {
+        "ticker": "NVDA",
+        "date": "2025-01-24",
+        "close": 140.0
+      },
+      {
+        "ticker": "NVDA",
+        "date": "2025-01-27",
+        "close": 118.42
+      }
+    ],
+    "news": [
+      {
+        "title": "Un modèle d'IA à faible coût inquiète le secteur (données fictives de test)",
+        "source": "Source fictive A",
+        "date": "2025-01-27",
+        "text": "Un laboratoire annonce un modèle performant entraîné à moindre coût."
+      }
+    ],
+    "must_include": [
+      "NVDA"
+    ],
+    "must_not_include": [
+      "achetez",
+      "vendez"
+    ]
+  },
+  {
+    "case_id": "team-taux-directeur",
+    "question": "La banque centrale a relevé son taux directeur : que signifie-t-il pour mon portefeuille ?",
+    "persona": "equilibre",
+    "as_of": "2025-03-20",
+    "portfolio": {
+      "holdings": [
+        {
+          "ticker": "VTI",
+          "weight_pct": 40,
+          "sector": "Actions diversifiées"
+        },
+        {
+          "ticker": "BND",
+          "weight_pct": 40,
+          "sector": "Obligations"
+        },
+        {
+          "ticker": "NVDA",
+          "weight_pct": 5,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "GLD",
+          "weight_pct": 15,
+          "sector": "Or"
+        }
+      ]
+    },
+    "news": [
+      {
+        "title": "La banque centrale relève son taux directeur de 0,25 point (données fictives de test)",
+        "source": "Source fictive B",
+        "date": "2025-03-19",
+        "text": "Elle invoque une inflation persistante."
+      }
+    ],
+    "must_include": [
+      "taux"
+    ],
+    "must_not_include": [
+      "achetez",
+      "vendez"
+    ]
+  },
+  {
+    "case_id": "team-ralentissement-ia",
+    "question": "Le secteur de l'IA ralentit-il et suis-je exposé ?",
+    "persona": "equilibre",
+    "tickers": [
+      "NVDA"
+    ],
+    "as_of": "2025-02-15",
+    "portfolio": {
+      "holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA",
+          "weight_pct": 35,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "AMD",
+          "weight_pct": 15,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "MSFT",
+          "weight_pct": 20,
+          "sector": "Logiciels"
+        },
+        {
+          "ticker": "BND",
+          "weight_pct": 30,
+          "sector": "Obligations"
+        }
+      ]
+    },
+    "news": [
+      {
+        "title": "Un grand client réduit ses dépenses en infrastructures d'IA (données fictives de test)",
+        "source": "Source fictive A",
+        "date": "2025-02-12",
+        "text": "Baisse des commandes annoncée pour le prochain trimestre."
+      }
+    ],
+    "must_include": [
+      "IA"
+    ],
+    "must_not_include": [
+      "achetez",
+      "vendez"
+    ]
+  },
+  {
+    "case_id": "team-concentration",
+    "question": "Mon portefeuille est-il trop concentré sur la technologie ?",
+    "persona": "prudent",
+    "tickers": [
+      "NVDA"
+    ],
+    "horizon_years": 10,
+    "portfolio": {
+      "holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA",
+          "weight_pct": 35,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "AMD",
+          "weight_pct": 15,
+          "sector": "Semi-conducteurs"
+        },
+        {
+          "ticker": "MSFT",
+          "weight_pct": 20,
+          "sector": "Logiciels"
+        },
+        {
+          "ticker": "BND",
+          "weight_pct": 30,
+          "sector": "Obligations"
+        }
+      ]
+    },
+    "documents": [
+      "Le portefeuille de l'utilisateur est détaillé dans les données fournies. (données fictives de test)"
+    ],
+    "must_include": [
+      "diversification"
+    ],
+    "must_not_include": [
+      "achetez",
+      "vendez"
+    ]
+  },
+  {
+    "case_id": "team-sources-contradictoires",
+    "question": "Les résultats d'Alpha Inc. sont-ils bons ou mauvais ?",
+    "persona": "equilibre",
+    "as_of": "2025-04-30",
+    "news": [
+      {
+        "title": "Alpha Inc. dépasse les attentes au T1 (données fictives de test)",
+        "source": "Source fictive A",
+        "date": "2025-04-29",
+        "text": "Revenus de 120 M$, en hausse de 8 %."
+      },
+      {
+        "title": "Alpha Inc. déçoit au T1 (données fictives de test)",
+        "source": "Source fictive B",
+        "date": "2025-04-29",
+        "text": "Revenus de 120 M$ mais marge en baisse ; prévisions abaissées."
+      }
+    ],
+    "must_include": [
+      "Alpha"
+    ],
+    "must_not_include": [
+      "achetez",
+      "vendez"
+    ]
+  },
+  {
+    "case_id": "team-preuves-insuffisantes",
+    "question": "Pourquoi l'action Zeta Corp. a-t-elle chuté hier ?",
+    "persona": "audacieux",
+    "tickers": [
+      "ZETA"
+    ],
+    "must_include": [
+      "Aucune"
+    ],
+    "must_not_include": [
+      "achetez",
+      "vendez"
+    ],
+    "expected_assessment": "insufficient_evidence"
+  }
+]
