@@ -5,6 +5,8 @@ Assistant agentique **auto-explicatif** pour éclairer une décision d'investiss
 portefeuille fictif, débat de ses propres conclusions et ne rend que ce que les preuves permettent d'affirmer.
 Simulation uniquement : aucune transaction, aucun conseil financier personnalisé.
 
+**Démo en ligne : https://d21ksxcxsl84gd.cloudfront.net** — sur l'accueil, « Or try a reference persona » charge Amira, Mateo ou Robert.
+
 ![Vue d'ensemble](docs/diagrams/architecture-simple.svg)
 
 Architecture détaillée : [`docs/diagrams/architecture-technique.svg`](docs/diagrams/architecture-technique.svg)
