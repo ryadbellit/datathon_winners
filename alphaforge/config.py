@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     guardrail_version: str = "DRAFT"
     guardrail_tasks: list[str] = ["orchestration"]  # jamais "evaluation" : le juge doit lire les réponses brutes
     knowledge_base_id: str | None = None
+    market_data: str = "none"  # none | yahoo (actualités et prix via yfinance, pour l'API)
 
     storage_backend: str = "local"  # local | s3
     local_storage_dir: str = "./data"

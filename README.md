@@ -24,6 +24,15 @@ chaque appel : ModelRouter ─► tâche (agent | orchestration | evaluation) �
 | `config.py`, `cli.py` | Configuration (`.env`) et commandes |
 | `team/` | **Workflow à 5 agents avec débat** (preuves, événements, portefeuille, avocat du diable, gouvernance) : voir [`alphaforge/team/README.md`](alphaforge/team/README.md) |
 
+## Application (API + interface)
+
+```powershell
+pip install -e ".[dev]"
+flask --app server.src.main run --port 5000        # API : POST /api/analyze, GET /api/health (MARKET_DATA=yahoo pour de vraies actualités/prix)
+cd alphaforge-ai; npm install; npm run dev        # interface (proxy /api -> :5000) ; le chat de « Scenario analysis » interroge les 5 agents
+```
+`server/src/main.py` traduit profil + portefeuille du front en `AnalysisRequest` ; sans API joignable, le chat retombe sur la réponse simulée locale.
+
 ## Installation
 
 ```powershell
