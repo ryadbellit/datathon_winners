@@ -221,6 +221,8 @@ __marimo__/
 
 # AlphaForge : sorties locales (le dataset golden et les baselines restent versionnés)
 /data/reports/
+# Jeu de départ PolyFinances (Yahoo, Banque du Canada, FRED) : non redistribué, voir README
+/data/starter/
 /data/artifacts/
 /data/external/
 mlruns/
