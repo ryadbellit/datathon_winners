@@ -1,4 +1,4 @@
-"""Ligne de commande : ask | evaluate | check-routes."""
+"""Ligne de commande : ask | evaluate | check-routes | upload-datasets."""
 from __future__ import annotations
 
 import argparse
@@ -8,77 +8,54 @@ from pathlib import Path
 
 from alphaforge.config import Settings, get_settings
 from alphaforge.contracts import AnalysisRequest, Persona
-from alphaforge.evaluation.dataset import load_dataset
-from alphaforge.evaluation.judge import LLMJudge
-from alphaforge.evaluation.runner import Baseline, detect_regression, run_evaluation, to_baseline
-from alphaforge.llm.base import LLMError, LLMRequest
-from alphaforge.llm.router import ModelRouter
-from alphaforge.observability.logging import add_cloudwatch_handler, make_model_call_logger, setup_logging
-from alphaforge.observability.usage import UsageTracker
+from alphaforge.evaluation import Baseline, detect_regression, load_dataset, log_to_mlflow, run_evaluation
+from alphaforge.llm import LLMError, LLMRequest, ModelRouter
+from alphaforge.observability import UsageTracker, model_call_logger, setup_logging
 from alphaforge.orchestrator import Orchestrator
+from alphaforge.retrieval import KnowledgeBase
 from alphaforge.storage import BASELINES, DATASETS, REPORTS, LocalStorage, StorageNotFoundError, get_storage
 
 
-def _setup_logging(settings: Settings) -> None:
-    setup_logging(settings.log_level)
-    if settings.cloudwatch_log_group:
-        try:
-            add_cloudwatch_handler(
-                settings.cloudwatch_log_group,
-                settings.cloudwatch_log_stream_prefix,
-                region=settings.aws_region,
-                profile=settings.aws_profile,
-                retention_days=settings.cloudwatch_retention_days,
-            )
-        except Exception as exc:  # l'observabilité ne doit jamais empêcher l'application de tourner
-            print(f"CloudWatch indisponible, logs locaux uniquement : {type(exc).__name__}: {exc}", file=sys.stderr)
-
-
-def _build(settings: Settings):
-    _setup_logging(settings)
+def _build(settings: Settings, with_kb: bool = True):
+    setup_logging(settings)
     tracker = UsageTracker()
-    router = ModelRouter.from_settings(
-        settings,
-        observers=[tracker, make_model_call_logger(settings.log_prompts, emf=settings.cloudwatch_metrics)],
-    )
-    return router, tracker
+    router = ModelRouter.from_settings(settings, [tracker, model_call_logger(settings.cloudwatch_metrics)])
+    kb = KnowledgeBase(settings) if with_kb and settings.knowledge_base_id else None
+    return Orchestrator(router, kb), router, tracker
 
 
 def cmd_ask(args, settings: Settings) -> int:
-    router, tracker = _build(settings)
+    orchestrator, _, tracker = _build(settings)
     documents = [Path(p).read_text(encoding="utf-8") for p in args.doc]
-    request = AnalysisRequest(question=args.question, persona=Persona(args.persona), documents=documents)
-    report = Orchestrator(router).run(request)
+    report = orchestrator.run(AnalysisRequest(question=args.question, persona=Persona(args.persona), documents=documents))
     print(f"\n=== Réponse ({report.persona.value}) ===\n{report.answer}\n")
     for r in report.agent_results:
         print(f"- {r.agent} [{r.model_id}] confiance={r.confidence:.2f}" + (f" ERREUR={r.error}" if r.error else ""))
+    if report.sources:
+        print("\nSources : " + ", ".join(report.sources))
     print("\n=== Consommation ===")
     print(json.dumps(tracker.summary(), ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_evaluate(args, settings: Settings) -> int:
-    router, tracker = _build(settings)
+    orchestrator, router, _ = _build(settings, with_kb=args.with_kb)  # sans KB par défaut : baseline reproductible
     storage = get_storage(settings)
-    cases = load_dataset(storage, args.dataset)
-    report = run_evaluation(Orchestrator(router), LLMJudge(router), cases, args.dataset)
+    report = run_evaluation(orchestrator, router, load_dataset(storage, args.dataset), args.dataset)
     storage.put_json(f"{REPORTS}/{report.run_id}.json", report.model_dump(mode="json"))
 
-    print(f"Run {report.run_id} : {report.n_cases} cas | règles OK {report.rule_pass_rate:.0%} | "
-          f"note juge {report.mean_judge_score} | échecs juge {report.judge_failures} | "
-          f"tokens {report.usage.total_tokens} | coût {report.estimated_cost_usd}")
+    print(
+        f"Run {report.run_id} : {report.n_cases} cas | règles OK {report.rule_pass_rate:.0%} | note juge {report.mean_judge_score} | "
+        f"échecs juge {report.judge_failures} | tokens {report.usage.total_tokens} | coût {report.estimated_cost_usd}"
+    )
     for c in report.cases:
-        status = "OK " if c.passed_rules else "KO "
-        print(f"  {status}{c.case_id:<24} juge={c.judge.score} {'; '.join(c.rule_failures)}")
-
+        print(f"  {'OK ' if not c.rule_failures else 'KO '}{c.case_id:<24} juge={c.judge.score} {'; '.join(c.rule_failures)}")
     if args.mlflow:
-        from alphaforge.evaluation.tracking import log_to_mlflow
-
         print(f"MLflow run : {log_to_mlflow(report, settings)} (voir : mlflow ui --backend-store-uri {settings.mlflow_tracking_uri})")
 
     baseline_key = f"{BASELINES}/{args.dataset}.json"
     if args.save_baseline:
-        storage.put_json(baseline_key, to_baseline(report).model_dump())
+        storage.put_json(baseline_key, Baseline(mean_judge_score=report.mean_judge_score, rule_pass_rate=report.rule_pass_rate).model_dump())
         print(f"Baseline enregistrée : {baseline_key}")
     elif args.baseline:
         try:
@@ -93,8 +70,8 @@ def cmd_evaluate(args, settings: Settings) -> int:
 
 
 def cmd_check_routes(args, settings: Settings) -> int:
-    """Vérifie chaque modèle de chaque route avec un appel minuscule (coût négligeable)."""
-    setup_logging(settings.log_level)
+    """Teste chaque modèle de chaque route avec un appel minuscule (coût négligeable)."""
+    setup_logging(settings)
     failures = 0
     for task, entries in settings.llm_routes.items():
         for entry in entries:
@@ -109,7 +86,7 @@ def cmd_check_routes(args, settings: Settings) -> int:
 
 
 def cmd_upload_datasets(args, settings: Settings) -> int:
-    """Copie les datasets locaux (./data/datasets) vers le stockage configuré (ex. S3)."""
+    """Copie ./data/datasets vers le stockage configuré (ex. S3)."""
     source, target = LocalStorage(args.source), get_storage(settings)
     keys = source.list(f"{DATASETS}/")
     for key in keys:
@@ -134,12 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--mlflow", action="store_true", help="Enregistre le run dans MLflow")
     ev.add_argument("--baseline", action="store_true", help="Compare à la baseline ; code de sortie 1 si régression")
     ev.add_argument("--save-baseline", action="store_true", help="Enregistre ce run comme nouvelle baseline")
+    ev.add_argument("--with-kb", action="store_true", help="Utilise aussi la Knowledge Base")
     ev.set_defaults(func=cmd_evaluate)
 
-    chk = sub.add_parser("check-routes", help="Teste chaque modèle configuré (appel réel si Bedrock)")
-    chk.set_defaults(func=cmd_check_routes)
+    sub.add_parser("check-routes", help="Teste chaque modèle configuré").set_defaults(func=cmd_check_routes)
 
-    up = sub.add_parser("upload-datasets", help="Envoie ./data/datasets vers le stockage configuré (STORAGE_BACKEND)")
+    up = sub.add_parser("upload-datasets", help="Envoie ./data/datasets vers le stockage configuré")
     up.add_argument("--source", default="data", help="Dossier local source (défaut : data)")
     up.set_defaults(func=cmd_upload_datasets)
 

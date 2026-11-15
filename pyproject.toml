@@ -16,15 +16,6 @@ dependencies = [
     "sqlparse>=0.5",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest>=8", "moto[s3]>=5"]
 
 [tool.setuptools.packages.find]
 include = ["alphaforge*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-m 'not aws'"
-markers = [
-    "aws: appelle réellement AWS (coûte de l'argent, ignoré par défaut) - lancer avec: pytest -m aws",
-]

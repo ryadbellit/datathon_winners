@@ -1,105 +1,103 @@
-# AlphaForge AI : orchestrateur multi-agents (MVP)
+# AlphaForge AI
 
-Orchestrateur LangGraph qui répond à une question financière avec trois agents spécialisés (analyse de document, sentiment,
-explication du risque selon le persona Prudent / Équilibré / Audacieux), puis synthétise. Les appels LLM passent par un
-`ModelRouter` : **Amazon Bedrock** (Claude Haiku 5.5, Sonnet 5.5…) ou un **mock local**.
+Orchestrateur multi-agents (LangGraph) : trois agents analysent une question financière en parallèle (documents, sentiment,
+risque selon le persona Prudent / Équilibré / Audacieux), puis un modèle synthétise. Les appels passent par un `ModelRouter` :
+**Amazon Bedrock** ou un **mock local** (sans AWS). Ce dépôt ne contient ni frontend, ni calculs financiers, ni modèles ML.
 
-Ce dépôt ne contient ni frontend, ni calculs financiers, ni modèles ML (parties d'autres membres de l'équipe).
-Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) pour l'architecture, le routage, l'IAM et le déploiement.
+```
+question + persona
+   ├─ document_analyst ─┐  (Knowledge Base)
+   ├─ sentiment ────────┼─► synthèse (+ Guardrail) ─► réponse, sources, tokens, coût
+   └─ risk_explainer ───┘  (Knowledge Base)
+chaque appel : ModelRouter ─► tâche (agent | orchestration | evaluation) ─► modèle, avec fallback
+```
+
+| Fichier (`alphaforge/`) | Rôle |
+|---|---|
+| `contracts.py` | Formats de données Pydantic et State LangGraph |
+| `orchestrator.py`, `agents.py` | Le graphe, et les 3 agents (squelettes, sans calcul financier) |
+| `llm.py` | Interface fournisseur, Mock, Bedrock (API Converse), `ModelRouter` (fallback, coût, guardrail) |
+| `retrieval.py` | Recherche dans la Knowledge Base Bedrock |
+| `storage.py` | Stockage local ou S3 (datasets, rapports, baselines) |
+| `observability.py` | Logs JSON (CloudWatch), métriques, suivi des tokens et du coût |
+| `evaluation.py` | Règles + juge LLM, détection de régression, MLflow |
+| `config.py`, `cli.py` | Configuration (`.env`) et commandes |
 
 ## Installation
 
 ```powershell
-pip install -e ".[dev]"
-copy .env.example .env      # puis éditez .env si besoin
+pip install -e .
+copy .env.example .env      # puis éditez .env
 ```
 
-## Local, sans AWS (par défaut)
-
-Aucun identifiant requis : tout passe par le provider `mock` et le dossier `./data`.
+## Utilisation
 
 ```powershell
-python -m pytest                                              # 64 tests, aucun appel AWS, aucun coût
-python -m alphaforge ask "Qu'est-ce qu'un FNB obligataire ?" --persona prudent
+python -m alphaforge check-routes                      # teste chaque modèle configuré
+python -m alphaforge ask "Quels sont les risques d'Alpha Inc. ?" --persona prudent [--doc fichier.txt]
+python -m alphaforge upload-datasets                   # envoie ./data/datasets vers le stockage configuré (S3)
 python -m alphaforge evaluate --dataset golden_v1 --mlflow
-mlflow ui --backend-store-uri sqlite:///mlflow.db             # consulter les runs
+python -m alphaforge evaluate --save-baseline          # enregistre la référence
+python -m alphaforge evaluate --baseline               # code de sortie 1 si régression
+mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-## Avec AWS Bedrock
+**Sans AWS** : laissez `LLM_ROUTES` par défaut (mock) et `STORAGE_BACKEND=local`. Une variable d'environnement qui redéfinit
+`LLM_ROUTES` est fusionnée avec celle du `.env` : pour passer en local, modifiez le `.env`.
 
-1. **Identifiants** (jamais dans le code ni dans git) : rôle IAM, ou profil (`AWS_PROFILE`), ou, pour un atelier,
-   les variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` dans votre `.env` local (ignoré par git).
-   Ces jetons d'atelier expirent : en cas d'`ExpiredToken`, recopiez-en de nouveaux.
-2. **Routes** : dans `.env`, décommentez/adaptez `LLM_ROUTES` (exemple dans `.env.example`).
-3. **Vérifier** chaque modèle configuré (petit appel réel, coût négligeable) :
-   ```powershell
-   python -m alphaforge check-routes
-   ```
-4. **Lancer** :
-   ```powershell
-   python -m alphaforge ask "Ce FNB est-il adapté à un profil prudent ?" --persona prudent --doc rapport.txt
-   python -m alphaforge evaluate --dataset golden_v1 --mlflow --save-baseline   # première fois
-   python -m alphaforge evaluate --dataset golden_v1 --baseline                 # détecte les régressions (code 1)
-   python -m pytest -m aws -s                                                   # tests réels (coûtent quelques centimes)
-   ```
-
-## Stockage S3
-
-Dans `.env` : `STORAGE_BACKEND=s3` et `S3_BUCKET=<votre-bucket>` (préfixe `alphaforge/` par défaut). Puis :
-
-```powershell
-python -m alphaforge upload-datasets      # envoie ./data/datasets vers S3
-python -m alphaforge evaluate --dataset golden_v1 --save-baseline   # lit le dataset depuis S3, y écrit rapports et baseline
-```
-
-## CloudWatch
-
-Dans `.env` (en PowerShell ou via `.env`, pas via `export` sous Git Bash qui transforme `/alphaforge/app` en chemin Windows) :
-
-```
-CLOUDWATCH_LOG_GROUP=/alphaforge/app
-CLOUDWATCH_METRICS=true
-```
-
-Le groupe est créé au besoin (rétention 14 jours). Chaque exécution écrit dans son propre flux ; les événements sont des JSON
-(`request_start`, `agent_run`, `model_call`, `request_end`, `agent_error`, `truncated`). Avec `CLOUDWATCH_METRICS=true`, chaque
-`model_call` produit aussi des métriques (espace de noms `AlphaForge`, dimensions `task` et `model_id` : `latency_ms`,
-`input_tokens`, `output_tokens`, `estimated_cost_usd` si le prix est configuré). Si CloudWatch est inaccessible, l'application
-continue avec les logs locaux. Sur ECS Fargate : laisser `CLOUDWATCH_LOG_GROUP` vide et utiliser le pilote `awslogs`.
-
-## Variables d'environnement
+## Configuration (`.env`)
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `LLM_ROUTES` | `{"default": ["mock:mock-model"]}` | JSON `{"tâche": ["fournisseur:model_id", ...]}` ; tâches : `orchestration`, `agent`, `evaluation`, `default` ; fournisseurs : `mock`, `bedrock` |
-| `LLM_MAX_TOKENS` | `{"default": 2048, "orchestration": 4096, "agent": 2048, "evaluation": 600}` | Limite de tokens de sortie par tâche |
-| `LLM_PRICING` | `{}` | Prix USD / 1M tokens par modèle. Vide = coût « inconnu » (jamais deviné) |
-| `AWS_REGION` | `us-east-1` | Région Bedrock / S3 |
-| `AWS_PROFILE` | (vide) | Profil AWS pour le développement local |
-| `BEDROCK_TIMEOUT_SECONDS` / `BEDROCK_MAX_RETRIES` | `60` / `3` | Délai et nouvelles tentatives (botocore, mode adaptatif) |
-| `STORAGE_BACKEND` | `local` | `local` ou `s3` |
-| `LOCAL_STORAGE_DIR` | `./data` | Racine du stockage local |
-| `S3_BUCKET`, `S3_PREFIX` | (vide), `alphaforge` | Bucket et préfixe S3 |
-| `CLOUDWATCH_LOG_GROUP`, `CLOUDWATCH_RETENTION_DAYS`, `CLOUDWATCH_METRICS` | (vide), `14`, `false` | Envoi des logs / métriques vers CloudWatch |
-| `LOG_LEVEL`, `LOG_PROMPTS` | `INFO`, `false` | Niveau de logs ; aperçu de prompt (débogage uniquement) |
-| `MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT` | `sqlite:///mlflow.db`, `alphaforge` | Suivi MLflow |
+| `LLM_ROUTES` | mock | `{"tâche": ["fournisseur:model_id", ...]}`, fallback dans l'ordre ; tâches `orchestration`, `agent`, `evaluation`, `default` ; fournisseurs `mock`, `bedrock` |
+| `LLM_MAX_TOKENS` | 2048 / 4096 / 2048 / 600 | Limite de sortie par tâche (trop bas = réponses tronquées, événement `truncated`) |
+| `LLM_PRICING` | `{}` | `{"model_id": {"input_per_1m": x, "output_per_1m": y}}` en USD ; vide = coût « inconnu » |
+| `AWS_REGION` / `AWS_PROFILE` | `us-east-1` / vide | Région ; profil local (sinon chaîne par défaut de boto3 : rôle IAM, variables) |
+| `BEDROCK_TIMEOUT_SECONDS`, `BEDROCK_MAX_RETRIES` | `60`, `3` | Délai et nouvelles tentatives |
+| `GUARDRAIL_ID`, `GUARDRAIL_VERSION`, `GUARDRAIL_TASKS` | vide, `DRAFT`, `["orchestration"]` | Guardrail Bedrock (jamais sur `evaluation`) |
+| `KNOWLEDGE_BASE_ID` | vide | Knowledge Base Bedrock : documents dans S3, **Sync** depuis la console |
+| `STORAGE_BACKEND`, `LOCAL_STORAGE_DIR` | `local`, `./data` | `local` ou `s3` |
+| `S3_BUCKET`, `S3_PREFIX` | vide, `alphaforge` | Bucket S3 |
+| `CLOUDWATCH_LOG_GROUP`, `CLOUDWATCH_RETENTION_DAYS`, `CLOUDWATCH_METRICS` | vide, `14`, `false` | Logs et métriques (EMF) vers CloudWatch |
+| `LOG_LEVEL`, `MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT` | `INFO`, `sqlite:///mlflow.db`, `alphaforge` | |
+
+Ne jamais mettre d'identifiants dans le code ; le `.env` est ignoré par git. Les jetons d'atelier expirent (`ExpiredToken` : les recopier).
+Sous Git Bash, ne pas exporter `/alphaforge/app` en variable d'environnement (converti en chemin Windows) : le mettre dans le `.env`.
+
+## Comportement
+
+- **Fallback** de modèle sur indisponibilité, limite de débit ou délai dépassé (pas sur une requête invalide). Erreurs typées.
+- **Résilience** : un agent ou la Knowledge Base en panne ne fait pas échouer la requête (résultat dégradé, événement journalisé).
+- **Logs JSON** : `request_id`, `model_call` (modèle, latence, tokens, coût), `agent_error`, `retrieval_error`, `truncated`,
+  `guardrail_intervened`, `request_end`. Jamais de prompt, de question ni d'identifiant.
+- **Coût** : tokens × `LLM_PRICING` ; `None` si un prix manque (jamais deviné). Estimation, pas la facture AWS.
+- **Évaluation** : règles (mots attendus/interdits, promesses interdites) + juge LLM 1-5 ; `evaluate` n'utilise pas la Knowledge Base sauf `--with-kb`.
 
 ## Permissions IAM
 
-Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#permissions-iam-requises) : `bedrock:InvokeModel`, `s3:GetObject/PutObject/ListBucket`.
+Rôle de la tâche ECS, ou profil en local (à resserrer à vos ressources) :
 
-## Limites connues et prérequis
+```json
+{"Version": "2012-10-17", "Statement": [
+  {"Effect": "Allow", "Action": ["bedrock:InvokeModel"],
+   "Resource": ["arn:aws:bedrock:*::foundation-model/*", "arn:aws:bedrock:*:<ACCOUNT_ID>:inference-profile/*"]},
+  {"Effect": "Allow", "Action": ["bedrock:ApplyGuardrail"], "Resource": "arn:aws:bedrock:*:<ACCOUNT_ID>:guardrail/*"},
+  {"Effect": "Allow", "Action": ["bedrock:Retrieve"], "Resource": "arn:aws:bedrock:*:<ACCOUNT_ID>:knowledge-base/*"},
+  {"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject"], "Resource": "arn:aws:s3:::<BUCKET>/alphaforge/*"},
+  {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::<BUCKET>"},
+  {"Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:PutRetentionPolicy"],
+   "Resource": "arn:aws:logs:*:<ACCOUNT_ID>:log-group:/alphaforge/*:*"}
+]}
+```
 
-- **Modèles** : tous les modèles Bedrock ne sont pas forcément activés sur votre compte. Les IDs sont configurables et à vérifier avec `check-routes` ; en cas d'indisponibilité, le routeur passe au modèle suivant de la route.
-- **Coût** : `estimated_cost_usd` vaut `None` tant que `LLM_PRICING` n'est pas renseigné (prix Bedrock à copier depuis la page de tarification AWS).
-- **Évaluation** : 4 cas seulement ; le juge LLM est stochastique (±0,25 observé) et le baseline dépend des modèles utilisés.
-- **Agents** : ce sont des squelettes qui appellent le LLM ; les données de marché et les calculs viendront des autres membres.
-- **ECS Fargate** : `Dockerfile` fourni mais **rien n'est déployé** ; pas de serveur HTTP dans ce MVP.
-- **MLflow** : base SQLite locale (`mlflow.db`, ignorée par git) ; le backend « fichiers » est déprécié.
-- **Tests S3** : simulés avec `moto` (aucun appel AWS). L'adaptateur S3 n'a pas été testé sur un vrai bucket.
-- Python 3.11+ (testé avec 3.14).
+`bedrock:InvokeModel` sur un profil d'inférence `global.`/`us.` exige aussi les modèles sous-jacents (d'où `foundation-model/*`).
+Les logs CloudWatch n'ont besoin d'un droit applicatif que si `CLOUDWATCH_LOG_GROUP` est défini ; avec le pilote `awslogs` d'ECS,
+c'est le rôle d'exécution qui écrit.
 
-## Scripts d'exemple
+## Limites connues
 
-`scripts/` : `check_aws_identity.py` (identité AWS), `example_converse.py` (API Converse avec Nova et Sonnet),
-`example_anthropic_bedrock.py` (SDK Anthropic sur Bedrock).
+- Les IDs de modèles sont à vérifier sur votre compte (`check-routes`) : tous les modèles Bedrock ne sont pas forcément activés.
+- 4 cas d'évaluation seulement ; le juge est stochastique (±0,25 observé) ; la baseline dépend des modèles utilisés.
+- Agents = squelettes : aucune donnée de marché ni appel d'outil. Pas d'API ni de frontend.
+- Le `Dockerfile` (ECS Fargate) est fourni mais jamais construit ni déployé.
+- Il n'y a pas de tests automatisés : vérifier avec `check-routes`, `ask` et `evaluate`.

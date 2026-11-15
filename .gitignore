@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# AlphaForge : sorties locales (le dataset golden et les baselines restent versionnés)
+/data/reports/
+/data/artifacts/
+/data/external/
+mlruns/
+mlartifacts/
+mlflow.db
