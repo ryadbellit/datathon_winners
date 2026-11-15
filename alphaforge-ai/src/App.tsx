@@ -6,6 +6,7 @@ import { OnboardingPage } from './features/form/OnboardingPage';
 import { ComingSoonPage, WelcomePage } from './features/misc/Pages';
 import { ComparePage } from './features/compare/ComparePage';
 import { ReportPage } from './features/reports/ReportPage';
+import { DebugPage } from './features/debug/DebugPage';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="scenarios" element={<ScenarioPage />} />
         <Route path="compare" element={<ComparePage />} />
         <Route path="reports" element={<ReportPage />} />
+        <Route path="debug" element={<DebugPage />} />
         <Route
           path="settings"
           element={<ComingSoonPage title="Settings" text="Display, privacy and data preferences will be managed here." />}

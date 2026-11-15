@@ -11,6 +11,57 @@ export interface AnalysisResult {
   debate_rounds: number;
   failures: string[];
   estimated_cost_usd: number | null;
+  // Full report data for debug view
+  evidence?: Evidence[];
+  research?: AgentOutput;
+  events?: AgentOutput;
+  portfolio?: AgentOutput;
+  conspiracy?: AgentOutput;
+  devil?: AgentOutput;
+  governance?: AgentOutput;
+  rebuttals?: Rebuttal[];
+  agent_results?: AgentResult[];
+}
+
+export interface Evidence {
+  id: string;
+  kind: 'news' | 'price' | 'document' | 'knowledge_base';
+  claim: string;
+  source: string;
+  reference: string;
+  date: string | null;
+  excerpt: string;
+  value: number | null;
+  unit: string | null;
+  validation: 'verified' | 'undated';
+}
+
+export interface AgentOutput {
+  schema_version?: string;
+  confidence: number;
+  status: 'ok' | 'partial' | 'no_evidence' | 'skipped' | 'failed';
+  error?: string | null;
+  [key: string]: any; // Allow additional fields specific to each agent
+}
+
+export interface Rebuttal {
+  agent: string;
+  objection: string;
+  response: string;
+  evidence_ids: string[];
+  missing_evidence: string | null;
+  concedes: boolean;
+}
+
+export interface AgentResult {
+  agent: string;
+  summary: string;
+  confidence: number;
+  model_id: string | null;
+  usage: { input_tokens: number; output_tokens: number; total_tokens: number };
+  estimated_cost_usd: number | null;
+  sources: string[];
+  error: string | null;
 }
 
 /** Current selection as portfolio lines, weights normalised to 100 % (the backend never invents weights). */

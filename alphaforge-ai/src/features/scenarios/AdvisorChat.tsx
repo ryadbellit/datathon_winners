@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { Loader2, Send, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Loader2, Send, X, Bug } from 'lucide-react';
 import { analyze, type AnalysisResult, type Assessment } from '../../api/analyze';
 import { answerChat, type ChatContext } from '../../lib/chat';
 import { useAppStore } from '../../shared/store';
@@ -40,6 +41,7 @@ function Sections({ text }: { text: string }) {
  * if it is unreachable the local simulated answer is used instead. The answer opens in a box above the bar.
  */
 export function AdvisorChat({ ctx }: { ctx: ChatContext | null }) {
+  const navigate = useNavigate();
   const profile = useAppStore((s) => s.profile);
   const selectedIds = useAppStore((s) => s.selectedIds);
   const overrides = useAppStore((s) => s.weightOverrides);
@@ -60,6 +62,15 @@ export function AdvisorChat({ ctx }: { ctx: ChatContext | null }) {
     setAnswer(null);
     try {
       const report = await analyze(question, profile, selectedIds, overrides, horizonOverride);
+      console.log('Analysis complete, report has agent data:', {
+        hasResearch: !!report.research,
+        hasEvents: !!report.events,
+        hasPortfolio: !!report.portfolio,
+        hasConspiracy: !!report.conspiracy,
+        hasDevil: !!report.devil,
+        hasGovernance: !!report.governance,
+        reportKeys: Object.keys(report),
+      });
       setAnswer({ question, text: report.answer, report });
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown error';
@@ -91,14 +102,30 @@ export function AdvisorChat({ ctx }: { ctx: ChatContext | null }) {
               {loading ? 'The agents are analysing your question…' : `You asked: ${answer?.question}`}
             </p>
             {!loading && (
-              <button
-                type="button"
-                onClick={() => setAnswer(null)}
-                aria-label="Close answer"
-                className="focus-ring -mr-1 -mt-1 rounded p-1 text-ink-2 hover:text-ink"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-1">
+                {answer?.report && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sessionStorage.setItem('debugReport', JSON.stringify(answer.report));
+                      navigate('/debug');
+                    }}
+                    aria-label="View agent details"
+                    className="focus-ring -mr-1 -mt-1 rounded p-1 text-brand-hover hover:text-brand"
+                    title="View detailed agent reasoning"
+                  >
+                    <Bug className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setAnswer(null)}
+                  aria-label="Close answer"
+                  className="focus-ring -mr-1 -mt-1 rounded p-1 text-ink-2 hover:text-ink"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             )}
           </div>
           {loading && <Loader2 className="mt-2 h-4 w-4 animate-spin text-ink-3" aria-hidden="true" />}

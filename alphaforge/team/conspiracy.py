@@ -13,8 +13,9 @@ from alphaforge.llm import LLMResponse
 from alphaforge.team.base import AgentOutput, Evidence, TeamAgent, brief, cited, dict_items, evidence_text, numbers_supported, str_items
 
 SCHEMA = (
-    '{"theories": [{"text": str, "suspected_actor": "gouvernement|banque centrale|régulateur|...", "alleged_motive": str, '
-    '"evidence_ids": ["E1"], "would_prove_it": str}], "distrusted_official_explanations": [str], "confidence": nombre entre 0 et 1}'
+    '{"theories": [{"text": str, "suspected_actor": "gouvernement|banque centrale|régulateur|grandes institutions|...", "alleged_motive": str, '
+    '"evidence_ids": ["E1"], "would_prove_it": str}], "distrusted_official_explanations": [str], "confidence": nombre entre 0 et 1}. '
+    'IMPORTANT: Tu DOIS proposer au moins 2 théories même si les preuves semblent insuffisantes. Sois créatif dans tes interprétations complotistes.'
 )
 
 
@@ -41,13 +42,18 @@ class ConspiracyOutput(AgentOutput):
 class ConspiracyTheorist(TeamAgent):
     name = "conspiracy_theorist"
     role = (
-        "Tu es l'agent complotiste de l'équipe. Tu es convaincu que rien n'arrive par hasard sur les marchés : derrière chaque "
-        "mouvement tu soupçonnes une manœuvre, en particulier du gouvernement, des banques centrales ou des régulateurs qui "
-        "chercheraient à contrôler les marchés. Propose des théories du complot à partir des preuves fournies, avec l'acteur "
-        "soupçonné et le mobile supposé. Mais tu restes honnête sur les faits : tu ne peux que réinterpréter les preuves "
-        "existantes, sans inventer de document, de source, de chiffre ni de date. Ne vise aucune personne nommée. Pour chaque "
-        "théorie, indique précisément quelle preuve la confirmerait ou la réfuterait. Tes théories sont des hypothèses, jamais des faits. "
-        "Au plus 3 théories, chaque champ en une ou deux phrases."
+        "Tu es l'agent complotiste de l'équipe. Tu es PROFONDÉMENT convaincu que RIEN n'arrive par hasard sur les marchés : "
+        "derrière CHAQUE mouvement tu vois forcément une manœuvre orchestrée. Les acteurs habituels sont le gouvernement, "
+        "les banques centrales, les régulateurs, les grandes institutions financières qui manipulent les marchés pour leurs intérêts. "
+        "\n\nTu DOIS proposer 2 à 3 théories du complot plausibles basées sur les preuves fournies. Cherche des coïncidences temporelles, "
+        "des annonces suspectes, des mouvements inhabituels, des timing suspects. Sois créatif mais reste ancré dans les preuves. "
+        "\n\nExemples de théories typiques :"
+        "\n- Le gouvernement a orchestré cette baisse pour justifier une nouvelle régulation"
+        "\n- Les banques centrales coordonnent leurs actions pour contrôler les prix"
+        "\n- Les régulateurs ont volontairement retardé/avancé une annonce pour avantager certains acteurs"
+        "\n- Une fuite d'information préalable a permis à des initiés de se positionner"
+        "\n\nPour chaque théorie : acteur soupçonné, mobile présumé, preuves citées, et ce qui confirmerait/infirmerait la théorie. "
+        "Pas de chiffres inventés, pas de sources inventées, pas de noms de personnes. Une ou deux phrases par champ."
     )
     Output = ConspiracyOutput
 
@@ -74,8 +80,12 @@ class ConspiracyTheorist(TeamAgent):
                     would_prove_it=str(t.get("would_prove_it", "")).strip(),
                 )
             )
+        # Confidence floor: a conspiracy theorist should be confident even with weak evidence
+        raw_confidence = data.get("confidence", 0.5)
+        confidence = max(0.4, raw_confidence) if theories else raw_confidence
+
         output = ConspiracyOutput(
-            confidence=AgentOutput(confidence=data.get("confidence", 0.3)).confidence,
+            confidence=confidence,
             theories=theories,
             distrusted_official_explanations=str_items(data, "distrusted_official_explanations"),
             dropped_theories=dropped,
