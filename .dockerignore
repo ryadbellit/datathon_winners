@@ -11,3 +11,9 @@ mlflow.db
 data/reports
 data/artifacts
 data/external
+alphaforge-ai/node_modules
+alphaforge-ai/dist
+data/starter
+docs
+deploy
+.pytest_cache
