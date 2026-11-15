@@ -1,4 +1,4 @@
-# Équipe de 5 agents (`alphaforge/team/`)
+# Équipe de 6 agents (`alphaforge/team/`)
 
 Question type : *« Pourquoi l'action NVIDIA a-t-elle baissé et quel impact sur mon portefeuille ? »*
 Le système répond avec des **preuves citées**, un **débat borné**, un **verdict prudent** et des **limites explicites**.
@@ -8,12 +8,12 @@ Chaque agent a son fichier : **chacun peut reprendre un agent sans toucher aux a
 question + profil + portefeuille
         │
    1. research ──(aucune preuve ? → direct à la gouvernance)
-        ├───────────────┐   en parallèle : ils ne dépendent que des preuves
-   2. event_hunter   3. portfolio_storyteller
-        └───────┬───────┘
+        ├───────────────┬────────────────────┐   en parallèle : ils ne dépendent que des preuves
+   2. event_hunter   3. portfolio_storyteller   6. conspiracy_theorist
+        └───────┬───────┴────────────────────┘
    4. devils_advocate ──(objection sérieuse ? sinon on saute le tour 2)
         │  tour 2 : seuls les agents objectés répondent (en parallèle, avec des preuves EXISTANTES)
-   5. governance  ──► verdict : supported | partially_supported | insufficient_evidence
+   5. governance  ──► verdict (+ avis sur chaque théorie du complot : rejected | unproven) : supported | partially_supported | insufficient_evidence
         │
    synthèse finale (6 sections, Guardrail) ──► TeamReport
 ```
@@ -26,7 +26,13 @@ question + profil + portefeuille
 | 2 | `events.py` | Identifier les événements du marché et les classer, sans affirmer de cause | `identified_events`, `event_timeline`, `alternative_explanations` | agent |
 | 3 | `portfolio.py` | Expliquer l'impact sur **le** portefeuille et vulgariser les notions | `direct_exposure`, `indirect_exposure`, `educational_explanation` | agent |
 | 4 | `devil.py` | Contester l'interprétation (objections ciblées) | `challenged_claims`, `alternative_hypotheses`, `evidence_needed` | arbitration (fort) |
-| 5 | `governance.py` | Arbitrer : valider/rejeter, plafonner le verdict | `validated_claims`, `rejected_claims`, `final_assessment` | arbitration (fort) |
+| 5 | `governance.py` | Arbitrer : valider/rejeter, plafonner le verdict, examiner les théories du complot | `validated_claims`, `rejected_claims`, `conspiracy_review`, `final_assessment` | arbitration (fort) |
+| 6 | `conspiracy.py` | Agent complotiste : voit derrière chaque mouvement une manœuvre (gouvernement, banque centrale, régulateur) pour contrôler les marchés | `theories` (acteur soupçonné, mobile, preuve qui la confirmerait), `distrusted_official_explanations` | agent (économique) |
+
+**Agent complotiste (stress test).** Ses théories sont **toujours** `validation="unproven"` (fixé par le code). Il ne peut que réinterpréter
+les preuves existantes : ID inconnu retiré, théorie avec un chiffre non étayé supprimée (`dropped_theories`). La gouvernance rend un avis
+sur chaque théorie (`rejected` ou `unproven`, jamais « validée ») ; une théorie recopiée dans `validated_claims` est rejetée par le code.
+Il n'est **pas** cible de l'avocat du diable et **ne plafonne jamais le verdict** : son échec est visible dans `failures` mais ne dégrade pas l'analyse.
 
 Autres fichiers : `base.py` (preuves, sortie typée, appel LLM JSON, règles communes), `graph.py` (graphe LangGraph, débat, synthèse,
 `TeamOrchestrator`), `interfaces.py` (ce que les autres équipes doivent brancher).
@@ -76,14 +82,14 @@ Le frontend appelle `TeamOrchestrator(llm, kb, market, quant, portfolios).run(An
 
 ```powershell
 pip install -e ".[dev]"
-python -m pytest -q                                   # 25 tests, fournisseur scripté, aucun appel AWS
+python -m pytest -q                                   # 30 tests, fournisseur scripté, aucun appel AWS
 python -m alphaforge analyze "Pourquoi NVIDIA a baissé ?" --ticker NVDA --persona prudent `
     --news news.json --prices prices.json --portfolio portfolio.json --as-of 2025-01-28
 python -m alphaforge evaluate --team --dataset golden_team_v1 --mlflow
 ```
 
 Avec les routes mock par défaut le workflow tourne sans AWS (réponses vides mais contrat respecté). Avec Bedrock : une analyse complète coûte environ
-7 appels (3 agents économiques, 1 réponse de débat, avocat + gouvernance + synthèse sur le modèle fort) — env. 0,1 $ avec Sonnet 5.5/Haiku 5.5.
+8 appels (4 agents économiques, 1 réponse de débat, avocat + gouvernance + synthèse sur le modèle fort) — env. 0,1 $ avec Sonnet 5.5/Haiku 5.5.
 
 ## Observabilité
 

@@ -1,4 +1,4 @@
-"""Tests de l'équipe de 5 agents. Fournisseur scripté : aucun appel réseau, aucun coût AWS."""
+"""Tests de l'équipe de 6 agents. Fournisseur scripté : aucun appel réseau, aucun coût AWS."""
 import datetime as dt
 import json
 
@@ -10,6 +10,7 @@ from alphaforge.llm import LLMProvider, LLMResponse, ModelRouter, ModelUnavailab
 from alphaforge.retrieval import RetrievalError
 from alphaforge.team import TeamOrchestrator
 from alphaforge.team.base import Rebuttal, cited, numbers_supported
+from alphaforge.team.conspiracy import ConspiracyOutput, ConspiracyTheorist, Theory
 from alphaforge.team.devil import DevilOutput
 from alphaforge.team.events import EventHunter
 from alphaforge.team.governance import GovernanceAgent
@@ -34,6 +35,7 @@ REQUEST = AnalysisRequest(
 )
 FACT_PRICE = "NVDA a varié de -15.41 % entre le 2025-01-24 et le 2025-01-27"
 FACT_NEWS = "Une annonce de modèle d'IA à faible coût a eu lieu le 2025-01-27"
+THEORY = "La baisse a été orchestrée pour justifier un contrôle accru du secteur des puces"
 
 SCRIPT = {
     "research": {
@@ -66,6 +68,16 @@ SCRIPT = {
         "educational_explanation": "La volatilité mesure l'ampleur des variations ; une baisse d'un jour n'annonce pas une tendance.",
         "confidence": 0.7,
     },
+    "conspiracy_theorist": {
+        "theories": [
+            {"text": THEORY, "suspected_actor": "gouvernement", "alleged_motive": "contrôler le marché des puces", "evidence_ids": ["E2", "E66"],
+             "would_prove_it": "Un document officiel planifiant une intervention"},
+            {"text": "Le gouvernement a vendu 500 milliards d'actions en secret", "suspected_actor": "gouvernement", "evidence_ids": ["E1"]},  # chiffre inventé
+            {"text": "", "suspected_actor": "banque centrale"},
+        ],
+        "distrusted_official_explanations": ["L'annonce du modèle d'IA serait un écran de fumée"],
+        "confidence": 0.9,
+    },
     "devils_advocate": {
         "challenged_claims": [
             {"target": "event_hunter", "claim": "Annonce d'un modèle d'IA chinois", "objection": "La coïncidence de date ne prouve pas la cause", "severity": "high", "evidence_ids": ["E2"]},
@@ -90,6 +102,7 @@ SCRIPT = {
         ],
         "evidence_gaps": ["Volumes d'échange"],
         "profile_consistency": {"status": "partly", "note": "Profil prudent : exposition de 20 % à une valeur."},
+        "conspiracy_review": [{"index": 0, "verdict": "rejected", "reason": "Aucune preuve d'intervention publique."}],
         "final_assessment": "supported",
         "confidence": 0.7,
     },
@@ -214,6 +227,48 @@ def test_devil_challenges_are_structured_and_invalid_targets_dropped():
     assert devil.alternative_hypotheses and devil.unsupported_assumptions and devil.evidence_needed and devil.risk_scenarios
 
 
+# --- Agent 6 : complotiste --------------------------------------------------------------------------------------------
+def test_conspiracy_theories_are_unproven_and_cannot_invent_numbers_or_evidence():
+    report, _ = run()
+    c = report.conspiracy
+    assert [t.text for t in c.theories] == [THEORY]  # chiffre inventé et théorie vide retirés
+    assert c.dropped_theories == 1 and all(t.validation == "unproven" for t in c.theories)
+    assert c.theories[0].evidence_ids == ["E2"] and c.theories[0].suspected_actor == "gouvernement"  # E66 (inexistante) retirée
+    assert c.distrusted_official_explanations
+
+
+def test_conspiracy_without_evidence_makes_no_llm_call():
+    out, responses = ConspiracyTheorist(build()[2]).run("Pourquoi ?", [])
+    assert out.status == "no_evidence" and out.theories == [] and responses == []
+
+
+def test_governance_reviews_every_theory_and_never_validates_one():
+    research, _ = ResearchAgent(build()[2]).run(REQUEST)
+    conspiracy = ConspiracyOutput(theories=[Theory(text=THEORY, evidence_ids=["E2"]), Theory(text="Les régulateurs savaient tout")])
+    data = {
+        "validated_claims": [{"text": FACT_PRICE, "kind": "fact", "evidence_ids": ["E1"]}, {"text": THEORY + ".", "kind": "fact", "evidence_ids": ["E2"]}],
+        "conspiracy_review": [{"index": 0, "verdict": "rejected", "reason": "Contredit par les preuves."}, {"index": 1, "verdict": "plausible"}],
+        "final_assessment": "supported",
+    }
+    out = GovernanceAgent._enforce(data, research.evidence, research, DevilOutput(), [], {"research": "ok"}, conspiracy)
+    assert [c.text for c in out.validated_claims] == [FACT_PRICE]
+    assert any(c.text == THEORY + "." and "complotiste" in c.reason for c in out.rejected_claims)
+    assert [(r.verdict, r.reason) for r in out.conspiracy_review] == [
+        ("rejected", "Contredit par les preuves."), ("unproven", "Aucune preuve fournie ne confirme cette théorie.")
+    ]
+
+
+def test_conspiracy_failure_is_visible_but_does_not_cap_the_verdict():
+    report, _ = run({"conspiracy_theorist": ModelUnavailableError("down")})
+    assert report.failures == ["conspiracy_theorist"] and report.conspiracy.status == "failed"
+    assert report.assessment == "supported"  # agent satellite : son échec ne dégrade pas l'analyse
+
+
+def test_full_report_carries_conspiracy_review_to_synthesis():
+    report, _ = run()
+    assert [(r.theory, r.verdict) for r in report.governance.conspiracy_review] == [(THEORY, "rejected")]
+
+
 # --- Agent 5 : gouvernance ---------------------------------------------------------------------------------------------
 def test_governance_rejects_unsupported_and_downgrades_causal_facts():
     report, _ = run()
@@ -237,12 +292,14 @@ def test_governance_cannot_exceed_what_rules_allow():
 def test_full_workflow_two_debate_rounds():
     report, provider = run()
     calls = provider.calls
-    assert calls[0] == "research" and sorted(calls[1:3]) == ["event_hunter", "portfolio_storyteller"]  # les deux agents sont indépendants
-    assert calls[3:] == ["devils_advocate", "event_hunter:rebuttal", "governance", "synthesis"]  # 7 appels au total
+    assert calls[0] == "research" and sorted(calls[1:4]) == ["conspiracy_theorist", "event_hunter", "portfolio_storyteller"]  # indépendants
+    assert calls[4:] == ["devils_advocate", "event_hunter:rebuttal", "governance", "synthesis"]  # 8 appels au total
     assert report.debate_rounds == 2 and report.assessment == "supported" and not report.failures
     assert report.rebuttals[0].evidence_ids == ["E2"]  # E77 (inexistante) retirée
-    assert [r.agent for r in report.agent_results] == ["research", "event_hunter", "portfolio_storyteller", "devils_advocate", "governance", "event_hunter:rebuttal"]
-    assert report.usage.total_tokens == 150 * 7 and report.estimated_cost_usd is not None
+    assert [r.agent for r in report.agent_results] == [
+        "research", "event_hunter", "portfolio_storyteller", "conspiracy_theorist", "devils_advocate", "governance", "event_hunter:rebuttal"
+    ]
+    assert report.usage.total_tokens == 150 * 8 and report.estimated_cost_usd is not None
     assert report.sources == ["Reuters", "données de prix fournies"]
 
 
@@ -262,7 +319,7 @@ def test_debate_skipped_when_no_serious_objection():
     low = {"challenged_claims": [{"target": "research", "claim": "c", "objection": "détail", "severity": "low"}], "counterarguments": ["x"]}
     report, provider = run({"devils_advocate": low})
     assert report.debate_rounds == 1 and report.rebuttals == []
-    assert not any(c.endswith(":rebuttal") for c in provider.calls) and len(provider.calls) == 6
+    assert not any(c.endswith(":rebuttal") for c in provider.calls) and len(provider.calls) == 7
 
 
 def test_rebuttal_without_evidence_keeps_disagreement_open():

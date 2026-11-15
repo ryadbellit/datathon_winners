@@ -1,4 +1,4 @@
-"""Workflow LangGraph des 5 agents : preuves -> (événements ‖ portefeuille) -> avocat du diable -> [réponses] -> gouvernance -> synthèse."""
+"""Workflow LangGraph des 6 agents : preuves -> (événements ‖ portefeuille ‖ complotiste) -> avocat du diable -> [réponses] -> gouvernance -> synthèse."""
 from __future__ import annotations
 
 import contextvars
@@ -17,6 +17,7 @@ from alphaforge.llm import LLMError, LLMRequest
 from alphaforge.observability import bind_request_id
 from alphaforge.retrieval import KnowledgeBase
 from alphaforge.team.base import PROMPT_VERSION, AgentOutput, Evidence, Rebuttal, TeamAgent, brief, to_result
+from alphaforge.team.conspiracy import ConspiracyOutput, ConspiracyTheorist
 from alphaforge.team.devil import TARGETS, DevilOutput, DevilsAdvocate
 from alphaforge.team.events import EventHunter, EventsOutput
 from alphaforge.team.governance import GovernanceAgent, GovernanceOutput
@@ -25,7 +26,7 @@ from alphaforge.team.portfolio import PortfolioOutput, PortfolioStoryteller
 from alphaforge.team.research import ResearchAgent, ResearchOutput
 
 logger = logging.getLogger("alphaforge.team")
-ORDER = ("research", "event_hunter", "portfolio_storyteller", "devils_advocate", "governance")
+ORDER = ("research", "event_hunter", "portfolio_storyteller", "conspiracy_theorist", "devils_advocate", "governance")
 SECTIONS = (
     "1. Que s'est-il passé ?",
     "2. Pourquoi cela a-t-il pu arriver ?",
@@ -39,7 +40,8 @@ SYNTHESIS_SYSTEM = (
     "uniquement à partir du rapport validé fourni (ne rien ajouter). Utilise exactement ces sections en Markdown : "
     + " ; ".join(f"## {s}" for s in SECTIONS)
     + ". Sépare faits vérifiés, interprétations et scénarios hypothétiques. Cite les preuves entre crochets [E1]. "
-    "Section 4 : interprétation initiale, meilleurs contre-arguments, ce qui a survécu et ce qui reste incertain. "
+    "Section 4 : interprétation initiale, meilleurs contre-arguments, ce qui a survécu et ce qui reste incertain ; "
+    "résume brièvement les théories de l'agent complotiste en les présentant clairement comme non prouvées, avec l'avis de la gouvernance. "
     "Section 5 : ce que les preuves permettent de conclure et ce qui ne peut pas l'être ; respecte final_assessment ; "
     "n'écris AUCUNE recommandation d'achat ou de vente. N'invente aucun chiffre, aucune source, aucune date."
 )
@@ -50,6 +52,7 @@ class TeamState(GraphState, total=False):
     research: ResearchOutput
     events: EventsOutput
     portfolio: PortfolioOutput
+    conspiracy: ConspiracyOutput
     devil: DevilOutput
     rebuttals: Annotated[list[Rebuttal], operator.add]
     debate_rounds: int
@@ -65,6 +68,7 @@ class TeamReport(FinalReport):
     research: ResearchOutput
     events: EventsOutput
     portfolio: PortfolioOutput
+    conspiracy: ConspiracyOutput = ConspiracyOutput(status="skipped")
     devil: DevilOutput
     rebuttals: list[Rebuttal]
     governance: GovernanceOutput
@@ -72,7 +76,7 @@ class TeamReport(FinalReport):
 
 
 class TeamOrchestrator:
-    """Même interface que `Orchestrator` (`run(request) -> FinalReport`), avec 5 agents et un débat borné à 2 tours."""
+    """Même interface que `Orchestrator` (`run(request) -> FinalReport`), avec 6 agents et un débat borné à 2 tours."""
 
     def __init__(
         self,
@@ -86,6 +90,7 @@ class TeamOrchestrator:
         self._research = ResearchAgent(llm, kb, market)
         self._events, self._portfolio = EventHunter(llm), PortfolioStoryteller(llm, quant)
         self._devil, self._governance = DevilsAdvocate(llm), GovernanceAgent(llm)
+        self._conspiracy = ConspiracyTheorist(llm)
         self._debaters: dict[str, TeamAgent] = {
             "research": self._research, "event_hunter": self._events, "portfolio_storyteller": self._portfolio
         }
@@ -94,6 +99,10 @@ class TeamOrchestrator:
         graph.add_node("research", self._step(self._research, "research", self._run_research, lambda o: {"evidence": o.evidence}))
         graph.add_node("event_hunter", self._step(self._events, "events", lambda s: self._events.run(s["request"].question, s["evidence"])))
         graph.add_node("portfolio_storyteller", self._step(self._portfolio, "portfolio", lambda s: self._portfolio.run(s["request"], s["evidence"])))
+        graph.add_node(
+            "conspiracy_theorist",
+            self._step(self._conspiracy, "conspiracy", lambda s: self._conspiracy.run(s["request"].question, s["evidence"])),
+        )
         graph.add_node(
             "devils_advocate",
             self._step(self._devil, "devil", self._run_devil, lambda o: {"debate_rounds": 0 if o.status == "skipped" else 1}),
@@ -106,10 +115,11 @@ class TeamOrchestrator:
         # Sans preuve, inutile de chercher des événements ou de débattre : on passe directement à la gouvernance.
         graph.add_conditional_edges(
             "research",
-            lambda s: ["event_hunter", "portfolio_storyteller"] if s["evidence"] else "governance",
-            ["event_hunter", "portfolio_storyteller", "governance"],
+            lambda s: ["event_hunter", "portfolio_storyteller", "conspiracy_theorist"] if s["evidence"] else "governance",
+            ["event_hunter", "portfolio_storyteller", "conspiracy_theorist", "governance"],
         )
-        graph.add_edge(["event_hunter", "portfolio_storyteller"], "devils_advocate")  # indépendants entre eux, puis jonction
+        # indépendants entre eux (ils ne lisent que les preuves), puis jonction
+        graph.add_edge(["event_hunter", "portfolio_storyteller", "conspiracy_theorist"], "devils_advocate")
         # Tour 2 seulement s'il existe une objection sérieuse (haute ou moyenne) adressée à un agent.
         graph.add_conditional_edges(
             "devils_advocate",
@@ -157,6 +167,7 @@ class TeamOrchestrator:
         events, portfolio, devil = state.get("events"), state.get("portfolio"), state.get("devil")
         statuses = {"research": state["research"].status}
         statuses.update({n: o.status for n, o in (("event_hunter", events), ("portfolio_storyteller", portfolio), ("devils_advocate", devil)) if o})
+        # Le complotiste n'est pas dans `statuses` : son échec (visible dans `failures`) ne plafonne pas le verdict.
         return self._governance.run(
             state["request"],
             state.get("evidence", []),
@@ -166,6 +177,7 @@ class TeamOrchestrator:
             devil or DevilOutput(status="skipped"),
             state.get("rebuttals", []),
             statuses,
+            state.get("conspiracy"),
         )
 
     @staticmethod
@@ -231,7 +243,12 @@ class TeamOrchestrator:
                     mode="json",
                     include={"personalized", "direct_exposure", "indirect_exposure", "quantitative_observations", "relevant_financial_concepts", "educational_explanation", "potential_impacts"},
                 ),
-                "debat": {"contre_arguments": devil.counterarguments, "objections": [c.model_dump() for c in devil.challenged_claims], "reponses": [r.model_dump() for r in state.get("rebuttals", [])]},
+                "debat": {
+                    "contre_arguments": devil.counterarguments,
+                    "objections": [c.model_dump() for c in devil.challenged_claims],
+                    "reponses": [r.model_dump() for r in state.get("rebuttals", [])],
+                    "theories_complotistes_non_prouvees": [r.model_dump() for r in gov.conspiracy_review],
+                },
             }
             try:
                 response = self._llm.complete(LLMRequest(task="orchestration", agent="synthesis", system=SYNTHESIS_SYSTEM, prompt=json.dumps(payload, ensure_ascii=False)))
@@ -262,6 +279,7 @@ class TeamOrchestrator:
                 research=state["research"],
                 events=events,
                 portfolio=portfolio,
+                conspiracy=state.get("conspiracy", ConspiracyOutput(status="skipped")),
                 devil=devil,
                 rebuttals=state.get("rebuttals", []),
                 governance=gov,

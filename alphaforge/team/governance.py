@@ -9,6 +9,7 @@ from pydantic import BaseModel, model_validator
 from alphaforge.contracts import AnalysisRequest
 from alphaforge.llm import LLMResponse
 from alphaforge.team.base import AgentOutput, Evidence, Rebuttal, TeamAgent, brief, cited, dict_items, evidence_text, numbers_supported, str_items
+from alphaforge.team.conspiracy import ConspiracyOutput
 from alphaforge.team.devil import DevilOutput
 from alphaforge.team.events import EventsOutput
 from alphaforge.team.portfolio import PortfolioOutput
@@ -22,8 +23,13 @@ SCHEMA = (
     '"rejected_claims": [{"text": str, "kind": "fact|interpretation|hypothesis", "evidence_ids": [], "reason": str}], '
     '"unresolved_disagreements": [str], "evidence_gaps": [str], '
     '"profile_consistency": {"status": "yes|partly|no|unknown", "note": str}, "limitations": [str], '
+    '"conspiracy_review": [{"index": numéro de la théorie, "verdict": "rejected|unproven", "reason": str}], '
     '"final_assessment": "supported|partially_supported|insufficient_evidence", "confidence": nombre entre 0 et 1}'
 )
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\W+", " ", text).strip().lower()
 
 
 class Claim(BaseModel):
@@ -38,6 +44,14 @@ class ProfileCheck(BaseModel):
     note: str = ""
 
 
+class TheoryReview(BaseModel):
+    """Avis de la gouvernance sur une théorie de l'agent complotiste : jamais validée (au mieux « non prouvée »)."""
+
+    theory: str
+    verdict: Literal["rejected", "unproven"] = "unproven"
+    reason: str = ""
+
+
 class GovernanceOutput(AgentOutput):
     validated_claims: list[Claim] = []
     rejected_claims: list[Claim] = []
@@ -48,6 +62,7 @@ class GovernanceOutput(AgentOutput):
     interpretations: list[Claim] = []
     hypothetical_scenarios: list[Claim] = []
     limitations: list[str] = []
+    conspiracy_review: list[TheoryReview] = []
     final_assessment: Assessment = "insufficient_evidence"
 
     @model_validator(mode="after")
@@ -69,7 +84,9 @@ class GovernanceAgent(TeamAgent):
         "relève les contradictions, sépare faits vérifiés, interprétations et scénarios hypothétiques, vérifie la cohérence "
         "avec le profil et l'horizon de l'investisseur. Ne choisis PAS l'agent le plus convaincant : la qualité des preuves "
         "prime sur l'assurance du ton. Ne déclare jamais un désaccord résolu si les preuves restent insuffisantes. "
-        "Chaque affirmation validée doit citer des preuves existantes ; ce qui n'est pas étayé va dans rejected_claims."
+        "Chaque affirmation validée doit citer des preuves existantes ; ce qui n'est pas étayé va dans rejected_claims. "
+        "Examine chaque théorie de l'agent complotiste dans conspiracy_review (rejected si les preuves la contredisent, unproven "
+        "sinon) et ne la reprends jamais dans validated_claims."
     )
     task = "arbitration"
     max_tokens = 3000
@@ -88,7 +105,9 @@ class GovernanceAgent(TeamAgent):
         devil: DevilOutput,
         rebuttals: list[Rebuttal],
         statuses: dict[str, str],
+        conspiracy: ConspiracyOutput | None = None,
     ) -> tuple[GovernanceOutput, list[LLMResponse]]:
+        conspiracy = conspiracy or ConspiracyOutput(status="skipped")
         if not evidence:  # rien à arbitrer : pas d'appel LLM
             return (
                 GovernanceOutput(
@@ -111,13 +130,23 @@ class GovernanceAgent(TeamAgent):
             ),
             "devils_advocate": devil.model_dump(mode="json", exclude={"schema_version", "status", "error", "confidence"}),
             "rebuttals": [r.model_dump(mode="json") for r in rebuttals],
+            "conspiracy_theorist": [
+                {"index": i, **t.model_dump(mode="json", include={"text", "suspected_actor", "alleged_motive", "evidence_ids"})}
+                for i, t in enumerate(conspiracy.theories)
+            ],
         }
         data, response = self.ask(SCHEMA, payload)
-        return self._enforce(data, evidence, research, devil, rebuttals, statuses), [response]
+        return self._enforce(data, evidence, research, devil, rebuttals, statuses, conspiracy), [response]
 
     @staticmethod
     def _enforce(
-        data: dict, evidence: list[Evidence], research: ResearchOutput, devil: DevilOutput, rebuttals: list[Rebuttal], statuses: dict[str, str]
+        data: dict,
+        evidence: list[Evidence],
+        research: ResearchOutput,
+        devil: DevilOutput,
+        rebuttals: list[Rebuttal],
+        statuses: dict[str, str],
+        conspiracy: ConspiracyOutput | None = None,
     ) -> GovernanceOutput:
         """Règles déterministes appliquées APRÈS le LLM : il peut durcir le verdict, jamais l'adoucir."""
         by_id = {e.id: e for e in evidence}
@@ -134,9 +163,13 @@ class GovernanceAgent(TeamAgent):
                 if str(c.get("text", "")).strip()
             ]
 
+        theories = conspiracy.theories if conspiracy else []
+        theory_texts = {_norm(t.text) for t in theories}
         validated, rejected = [], claims("rejected_claims")
         for c in claims("validated_claims"):
-            if c.kind != "hypothesis" and not c.evidence_ids:
+            if _norm(c.text) in theory_texts:  # une théorie du complot n'est jamais validée
+                rejected.append(c.model_copy(update={"kind": "hypothesis", "reason": "Théorie de l'agent complotiste : non prouvée."}))
+            elif c.kind != "hypothesis" and not c.evidence_ids:
                 rejected.append(c.model_copy(update={"reason": "Aucune preuve référencée."}))
             elif c.kind == "fact" and not numbers_supported(c.text, [evidence_text(by_id[i]) for i in c.evidence_ids]):
                 rejected.append(c.model_copy(update={"reason": "Chiffre non présent dans les preuves citées."}))
@@ -173,6 +206,15 @@ class GovernanceAgent(TeamAgent):
             if facts and not verified_support:
                 reasons.append("aucune preuve datée et sourcée à l'appui des faits")
             limitations.append("Verdict plafonné par les règles de gouvernance : " + "; ".join(reasons) + ".")
+        reviews = {r["index"]: r for r in dict_items(data, "conspiracy_review") if isinstance(r.get("index"), int)}
+        conspiracy_review = [
+            TheoryReview(
+                theory=t.text,
+                verdict="rejected" if reviews.get(i, {}).get("verdict") == "rejected" else "unproven",
+                reason=str(reviews.get(i, {}).get("reason", "")).strip() or "Aucune preuve fournie ne confirme cette théorie.",
+            )
+            for i, t in enumerate(theories)
+        ]
         profile = data.get("profile_consistency") if isinstance(data.get("profile_consistency"), dict) else {}
         status = profile.get("status") if profile.get("status") in ("yes", "partly", "no", "unknown") else "unknown"
         return GovernanceOutput(
@@ -183,5 +225,6 @@ class GovernanceAgent(TeamAgent):
             evidence_gaps=list(dict.fromkeys(str_items(data, "evidence_gaps") + research.missing_information)),
             profile_consistency=ProfileCheck(status=status, note=str(profile.get("note", "")).strip()),
             limitations=limitations,
+            conspiracy_review=conspiracy_review,
             final_assessment=proposed if _RANK[proposed] <= _RANK[ceiling] else ceiling,
         )
