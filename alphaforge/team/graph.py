@@ -21,11 +21,14 @@ from alphaforge.team.conspiracy import ConspiracyOutput, ConspiracyTheorist
 from alphaforge.team.devil import TARGETS, DevilOutput, DevilsAdvocate
 from alphaforge.team.events import EventHunter, EventsOutput
 from alphaforge.team.governance import GovernanceAgent, GovernanceOutput
-from alphaforge.team.interfaces import MarketData, PortfolioProvider, QuantMetrics
+from alphaforge.team.interfaces import MarketData, PortfolioProvider, ProfileChecks, QuantMetrics
 from alphaforge.team.portfolio import PortfolioOutput, PortfolioStoryteller
 from alphaforge.team.research import ResearchAgent, ResearchOutput
+from alphaforge.tracing import span
 
 logger = logging.getLogger("alphaforge.team")
+# Abonné aux événements de progression de l'analyse en cours (ex. flux SSE du front) ; propagé aux threads comme le request_id.
+_on_event: contextvars.ContextVar[Callable[[dict], None] | None] = contextvars.ContextVar("on_event", default=None)
 ORDER = ("research", "event_hunter", "portfolio_storyteller", "conspiracy_theorist", "devils_advocate", "governance")
 SECTIONS = (
     "1. Que s'est-il passé ?",
@@ -40,10 +43,28 @@ SYNTHESIS_SYSTEM = (
     "uniquement à partir du rapport validé fourni (ne rien ajouter). Utilise exactement ces sections en Markdown : "
     + " ; ".join(f"## {s}" for s in SECTIONS)
     + ". Sépare faits vérifiés, interprétations et scénarios hypothétiques. Cite les preuves entre crochets [E1]. "
+    "Section 3, courte (8 lignes au plus), sans sous-titre : une phrase en **gras** qui dit simplement ce que cela change "
+    "pour l'investisseur ; puis des puces '- ' commençant par **Ce que vous détenez :** (lignes concernées et leur poids), "
+    "**Ce qui peut amortir ou amplifier :** (autres lignes du portefeuille), **Contrôles de votre profil :** (seulement les "
+    "contrôles « attention » ou « non respecté », cités [E..], en disant clairement si la demande est incohérente avec le profil, "
+    "sans acquiescer) et **À retenir :** (une notion financière expliquée en une phrase avec son cas). "
+    "Pas de calcul ni de chiffre absent du rapport. "
     "Section 4 : interprétation initiale, meilleurs contre-arguments, ce qui a survécu et ce qui reste incertain ; "
     "résume brièvement les théories de l'agent complotiste en les présentant clairement comme non prouvées, avec l'avis de la gouvernance. "
     "Section 5 : ce que les preuves permettent de conclure et ce qui ne peut pas l'être ; respecte final_assessment ; "
     "n'écris AUCUNE recommandation d'achat ou de vente. N'invente aucun chiffre, aucune source, aucune date."
+)
+GENERAL_SYSTEM = (
+    "Tu es l'assistant d'AlphaForge, une application pédagogique d'investissement. Aucune donnée de marché ni document "
+    "n'est disponible : réponds avec tes connaissances générales, à n'importe quelle question, pour un débutant. "
+    "FORMAT STRICT, 10 lignes maximum au total : "
+    "1) une phrase de réponse directe, la plus importante, en **gras** ; "
+    "2) puis 3 à 4 puces courtes ('- '), une idée par puce, une seule phrase chacune ; "
+    "3) si un portefeuille est fourni et que c'est pertinent, une dernière ligne qui commence par 'Pour vous : '. "
+    "Pas de titre, pas de tableau, pas de conclusion ni d'avertissement final (l'application l'affiche déjà). "
+    "Mots simples, phrases courtes ; explique tout terme technique en quelques mots. "
+    "Pour un fait récent (cours, actualité), dis en une demi-phrase que tu ne peux pas le confirmer, sans t'étendre. "
+    "N'invente aucune source ni aucun chiffre récent ; n'écris AUCUNE recommandation d'achat ou de vente."
 )
 
 
@@ -73,6 +94,7 @@ class TeamReport(FinalReport):
     rebuttals: list[Rebuttal]
     governance: GovernanceOutput
     failures: list[str]
+    answer_mode: str = "evidence"  # evidence (5 agents) | general_knowledge (aucune preuve : LLM seul) | incomplete
 
 
 class TeamOrchestrator:
@@ -85,10 +107,12 @@ class TeamOrchestrator:
         market: MarketData | None = None,
         quant: QuantMetrics | None = None,
         portfolios: PortfolioProvider | None = None,
+        checker: ProfileChecks | None = None,
     ):
         self._llm, self._portfolios = llm, portfolios
-        self._research = ResearchAgent(llm, kb, market)
-        self._events, self._portfolio = EventHunter(llm), PortfolioStoryteller(llm, quant)
+        # collecte unique : actualités, prix, métriques de risque et contrôles du profil
+        self._research = ResearchAgent(llm, kb, market, quant, checker)
+        self._events, self._portfolio = EventHunter(llm), PortfolioStoryteller(llm)
         self._devil, self._governance = DevilsAdvocate(llm), GovernanceAgent(llm)
         self._conspiracy = ConspiracyTheorist(llm)
         self._debaters: dict[str, TeamAgent] = {
@@ -109,7 +133,7 @@ class TeamOrchestrator:
         )
         graph.add_node("respond", self._respond)
         graph.add_node("governance", self._step(self._governance, "governance", self._run_governance))
-        graph.add_node("synthesize", self._synthesize)
+        graph.add_node("synthesize", self._observed("synthesis", self._synthesize, lambda update: update["report"].answer))
 
         graph.add_edge(START, "research")
         # Sans preuve, inutile de chercher des événements ou de débattre : on passe directement à la gouvernance.
@@ -155,7 +179,30 @@ class TeamOrchestrator:
             )
             return {key: output, "agent_results": [result], **(extra(output) if extra else {})}
 
-        return node
+        return self._observed(agent.name, node, lambda update: update[key].model_dump(mode="json"), lambda update: update[key].status)
+
+    @staticmethod
+    def _observed(name: str, fn: Callable, outputs: Callable, status: Callable = lambda _: "ok") -> Callable:
+        """Enveloppe une étape : span MLflow (si le tracing est actif) et événements agent_start / agent_end pour le front."""
+
+        def emit(**event) -> None:
+            callback = _on_event.get()
+            if callback:
+                callback({"agent": name, **event})
+
+        def wrapper(*args):
+            emit(type="agent_start")
+            try:
+                with span(name, "AGENT") as current:
+                    result = fn(*args)
+                    current.outputs(outputs(result))
+            except Exception:
+                emit(type="agent_end", status="failed")
+                raise
+            emit(type="agent_end", status=status(result))
+            return result
+
+        return wrapper
 
     def _run_research(self, state: TeamState):
         return self._research.run(state["request"])
@@ -219,8 +266,12 @@ class TeamOrchestrator:
             )
             return rebuttals, result
 
-        with ThreadPoolExecutor(len(jobs)) as pool:  # le contexte (request_id) est propagé à chaque thread
-            outcomes = list(pool.map(lambda j, ctx: ctx.run(run, j), jobs, [contextvars.copy_context() for _ in jobs]))
+        def traced_run(job):
+            name = f"{job[0].name}:rebuttal"
+            return self._observed(name, run, lambda out: [r.model_dump(mode="json") for r in out[0]], lambda out: "failed" if out[1].error else "ok")(job)
+
+        with ThreadPoolExecutor(len(jobs)) as pool:  # le contexte (request_id, span MLflow) est propagé à chaque thread
+            outcomes = list(pool.map(lambda j, ctx: ctx.run(traced_run, j), jobs, [contextvars.copy_context() for _ in jobs]))
         return {
             "rebuttals": [r for rebuttals, _ in outcomes for r in rebuttals],
             "agent_results": [result for _, result in outcomes],
@@ -234,11 +285,11 @@ class TeamOrchestrator:
         answer = None
         if evidence and gov.status != "failed":  # sinon réponse incomplète construite par le code, sans LLM
             payload = {
-                "persona": request.persona.value,
-                "horizon_years": request.horizon_years,
+                **request.profile(),
                 "rapport_gouvernance": gov.model_dump(mode="json", exclude={"schema_version", "facts", "interpretations", "hypothetical_scenarios"}),
                 "preuves": [brief(e) for e in evidence],
                 "chronologie": events.event_timeline,
+                "lignes_du_portefeuille": [h.model_dump(mode="json") for h in request.portfolio.holdings] if request.portfolio else [],
                 "portefeuille": portfolio.model_dump(
                     mode="json",
                     include={"personalized", "direct_exposure", "indirect_exposure", "quantitative_observations", "relevant_financial_concepts", "educational_explanation", "potential_impacts"},
@@ -256,9 +307,16 @@ class TeamOrchestrator:
             except LLMError as exc:
                 error = type(exc).__name__
                 logger.error("agent_error", extra={"event": "agent_error", "agent": "synthesis", "error_type": error})
+        mode = "evidence"
+        if answer is None and not evidence:  # aucune donnée : le LLM répond avec ses connaissances générales
+            answer, usage, cost, error = self._general_answer(request)
+            mode = "general_knowledge" if answer else "incomplete"
+        elif answer is None:
+            mode = "incomplete"
         if answer is None:
             answer = self._static_answer(state)
-        answer = self._finalize(answer, evidence, gov)
+        if mode != "general_knowledge":  # l'interface signale déjà le mode « connaissances générales » (answer_mode)
+            answer = self._finalize(answer, evidence, gov)
 
         results = sorted(state["agent_results"], key=lambda r: (ORDER.index(r.agent) if r.agent in ORDER else len(ORDER), r.agent))
         costs = [r.estimated_cost_usd for r in results] + [cost]
@@ -284,8 +342,24 @@ class TeamOrchestrator:
                 rebuttals=state.get("rebuttals", []),
                 governance=gov,
                 failures=failures,
+                answer_mode=mode,
             )
         }
+
+    def _general_answer(self, request: AnalysisRequest) -> tuple[str | None, TokenUsage, float | None, str | None]:
+        """Sans preuve : réponse libre du LLM (connaissances générales), clairement signalée comme non vérifiée."""
+        payload = {
+            "question": request.question,
+            **request.profile(),
+            "portefeuille": request.portfolio.model_dump(mode="json") if request.portfolio else None,
+        }
+        try:
+            response = self._llm.complete(LLMRequest(task="orchestration", agent="general", system=GENERAL_SYSTEM, prompt=json.dumps(payload, ensure_ascii=False)))
+        except LLMError as exc:
+            logger.error("agent_error", extra={"event": "agent_error", "agent": "general", "error_type": type(exc).__name__})
+            return None, TokenUsage(), 0.0, type(exc).__name__
+        text = (response.text or "").strip()
+        return (text or None), response.usage, response.estimated_cost_usd, None
 
     @staticmethod
     def _sources_block(evidence: list[Evidence], gov: GovernanceOutput) -> str:
@@ -319,7 +393,15 @@ class TeamOrchestrator:
         return "\n\n".join(f"## {title}\n{text}" for title, text in zip(SECTIONS, body))
 
     # --- Point d'entrée --------------------------------------------------------------------------------------------
-    def run(self, request: AnalysisRequest) -> TeamReport:
+    def run(self, request: AnalysisRequest, on_event: Callable[[dict], None] | None = None) -> TeamReport:
+        """`on_event` reçoit {"type": "agent_start" | "agent_end", "agent": nom, "status": ...} au fil de l'analyse."""
+        token = _on_event.set(on_event)
+        try:
+            return self._run(request)
+        finally:
+            _on_event.reset(token)
+
+    def _run(self, request: AnalysisRequest) -> TeamReport:
         with bind_request_id(request.request_id):
             started = time.perf_counter()
             if request.portfolio is None and request.user_id and self._portfolios:
@@ -327,7 +409,15 @@ class TeamOrchestrator:
                     request = request.model_copy(update={"portfolio": self._portfolios.get(request.user_id)})
                 except Exception as exc:  # interface externe : sans portefeuille, l'analyse devient générale
                     logger.warning("portfolio_error", extra={"event": "portfolio_error", "error_type": type(exc).__name__})
-            report = self._graph.invoke({"request": request, "agent_results": [], "rebuttals": [], "debate_rounds": 0})["report"]
+            inputs = {"question": request.question, "persona": request.persona.value, "tickers": request.tickers,
+                      "holdings": [h.ticker for h in request.portfolio.holdings] if request.portfolio else []}
+            with span("analyze", "CHAIN", inputs, request_id=request.request_id) as current:
+                report = self._graph.invoke({"request": request, "agent_results": [], "rebuttals": [], "debate_rounds": 0})["report"]
+                current.outputs(report.answer)
+                current.attributes(
+                    assessment=report.assessment, answer_mode=report.answer_mode, debate_rounds=report.debate_rounds,
+                    input_tokens=report.usage.input_tokens, output_tokens=report.usage.output_tokens, failures=report.failures,
+                )
             logger.info(
                 "request_end",
                 extra={

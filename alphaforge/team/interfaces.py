@@ -4,11 +4,11 @@ Aucune implémentation ici : sans elles, les agents le disent (« données indis
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
-from alphaforge.contracts import NewsItem, Portfolio, PricePoint
+from alphaforge.contracts import AnalysisRequest, NewsItem, Portfolio, PricePoint
 
 
 class Observation(BaseModel):
@@ -19,6 +19,15 @@ class Observation(BaseModel):
     unit: str | None = None
     source: str  # module ou jeu de données d'origine
     as_of: str | None = None
+
+
+class Check(BaseModel):
+    """Contrôle déterministe du profil (règle et seuil documentés) : visible par l'utilisateur, citable par les agents."""
+
+    rule: str  # ex. "Volatilité du portefeuille"
+    status: Literal["ok", "warn", "fail"]
+    detail: str  # constat chiffré, ex. "7.3 % pour un plafond de 8 % (profil prudent)"
+    source: str
 
 
 class MarketData(Protocol):
@@ -33,3 +42,7 @@ class PortfolioProvider(Protocol):
 
 class QuantMetrics(Protocol):
     def observations(self, portfolio: Portfolio, tickers: list[str]) -> list[Observation]: ...
+
+
+class ProfileChecks(Protocol):
+    def checks(self, request: AnalysisRequest) -> list[Check]: ...

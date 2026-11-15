@@ -9,7 +9,7 @@ from alphaforge.evaluation import EvalCase, check_rules
 from alphaforge.llm import LLMProvider, LLMResponse, ModelRouter, ModelUnavailableError
 from alphaforge.retrieval import RetrievalError
 from alphaforge.team import TeamOrchestrator
-from alphaforge.team.base import Rebuttal, cited, numbers_supported
+from alphaforge.team.base import InvalidOutputError, Rebuttal, cited, numbers_supported
 from alphaforge.team.conspiracy import ConspiracyOutput, ConspiracyTheorist, Theory
 from alphaforge.team.devil import DevilOutput
 from alphaforge.team.events import EventHunter
@@ -350,12 +350,24 @@ def test_missing_news_still_reports_price_move_without_causal_claim():
     assert report.rebuttals == [] and report.assessment != "supported"
 
 
-def test_insufficient_evidence_stops_early_and_stays_inconclusive():
-    report, provider = run(request=AnalysisRequest(question="Pourquoi NVIDIA baisse-t-elle ?", persona=Persona.BALANCED))
-    assert provider.calls == []  # aucun appel LLM : rien à analyser
+def test_no_evidence_answers_from_general_knowledge_without_debate():
+    report, provider = run(
+        script={"general": "Une action peut baisser pour de nombreuses raisons."},
+        request=AnalysisRequest(question="Pourquoi NVIDIA baisse-t-elle ?", persona=Persona.BALANCED),
+    )
+    assert provider.calls == ["general"]  # un seul appel LLM : ni agents, ni débat sans preuve
     assert report.assessment == "insufficient_evidence" and report.debate_rounds == 0 and report.evidence == []
+    assert report.answer_mode == "general_knowledge"
+    assert "Une action peut baisser" in report.answer and report.estimated_cost_usd is not None
+
+
+def test_no_evidence_and_llm_failure_falls_back_to_incomplete_answer():
+    report, provider = run(
+        script={"general": ModelUnavailableError("down")},
+        request=AnalysisRequest(question="Pourquoi NVIDIA baisse-t-elle ?", persona=Persona.BALANCED),
+    )
+    assert report.answer_mode == "incomplete" and report.assessment == "insufficient_evidence"
     assert "Analyse incomplète" in report.answer and "## 5. Le verdict" in report.answer
-    assert report.estimated_cost_usd == 0.0
 
 
 def test_conflicting_sources_are_preserved_as_uncertainty():
@@ -392,3 +404,60 @@ def test_evaluation_case_builds_request_and_checks_expected_assessment():
 def test_rebuttal_model_requires_agent_and_objection():
     with pytest.raises(Exception):
         Rebuttal(agent="x")
+
+
+def test_tracing_records_one_trace_with_agent_and_llm_spans(tmp_path, monkeypatch):
+    import mlflow
+
+    from alphaforge import tracing
+    from alphaforge.config import Settings
+
+    monkeypatch.setattr(tracing, "_mlflow", None)  # remis à None (tracing désactivé) après le test
+    settings = Settings(mlflow_tracing=True, mlflow_tracking_uri=f"sqlite:///{tmp_path}/mlflow.db", mlflow_experiment="test-tracing")
+    assert tracing.setup_tracing(settings)
+    report, _ = run()
+    mlflow.flush_trace_async_logging()  # export asynchrone : attendre l'écriture avant la relecture
+    trace = mlflow.get_trace(mlflow.get_last_active_trace_id())
+    spans = {s.name: s for s in trace.data.spans}
+    assert {"analyze", "research", "event_hunter", "portfolio_storyteller", "governance", "synthesis", "llm:research"} <= set(spans)
+    assert spans["analyze"].parent_id is None and spans["analyze"].outputs == report.answer  # une seule racine : la question
+    assert spans["llm:research"].attributes["input_tokens"] == 100
+
+
+def test_portfolio_explanation_with_invented_number_is_removed():
+    report, _ = run(script={"portfolio_storyteller": {"educational_explanation": "Votre portefeuille perdrait 7,8 % dans ce scénario."}})
+    assert report.portfolio.educational_explanation == ""
+    assert any("Explication pédagogique retirée" in x for x in report.portfolio.limitations)
+
+
+class FlakyProvider(LLMProvider):
+    """Renvoie d'abord un JSON cassé, puis un JSON valide."""
+
+    name = "flaky"
+
+    def __init__(self, replies):
+        self.replies, self.calls = list(replies), 0
+
+    def complete(self, request, model_id):
+        self.calls += 1
+        text, stop = self.replies.pop(0)
+        return LLMResponse(text=text, provider=self.name, model_id=model_id, usage=TokenUsage(input_tokens=10, output_tokens=5), stop_reason=stop)
+
+
+def flaky_agent(replies):
+    provider = FlakyProvider(replies)
+    router = ModelRouter({"default": ["flaky:m"]}, {"flaky": lambda: provider}, {"m": {"input_per_1m": 1.0, "output_per_1m": 1.0}})
+    return EventHunter(router), provider
+
+
+def test_malformed_json_is_retried_once_and_both_calls_are_counted():
+    agent, provider = flaky_agent([('{"a": "x", "}, {', "end_turn"), ('{"ok": true}', "end_turn")])
+    data, response = agent.ask("{}", {})
+    assert data == {"ok": True} and provider.calls == 2 and response.usage.input_tokens == 20
+
+
+def test_truncated_json_is_not_retried():
+    agent, provider = flaky_agent([('{"a": "coupé', "max_tokens"), ('{"ok": true}', "end_turn")])
+    with pytest.raises(InvalidOutputError):
+        agent.ask("{}", {})
+    assert provider.calls == 1
