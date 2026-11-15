@@ -136,7 +136,7 @@ class TeamOrchestrator:
             logger.info(
                 "agent_end",
                 extra={
-                    "event": "agent_end", "agent": agent.name, "status": output.status, "debate_round": state.get("debate_rounds", 0) + 1,
+                    "event": "agent_end", "agent": agent.name, "status": output.status, "debate_round": max(1, state.get("debate_rounds", 0)),
                     "prompt_version": PROMPT_VERSION, "model_id": result.model_id, "input_tokens": result.usage.input_tokens,
                     "output_tokens": result.usage.output_tokens, "estimated_cost_usd": result.estimated_cost_usd,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -208,7 +208,7 @@ class TeamOrchestrator:
             return rebuttals, result
 
         with ThreadPoolExecutor(len(jobs)) as pool:  # le contexte (request_id) est propagé à chaque thread
-            outcomes = list(pool.map(lambda j: contextvars.copy_context().run(run, j), jobs))
+            outcomes = list(pool.map(lambda j, ctx: ctx.run(run, j), jobs, [contextvars.copy_context() for _ in jobs]))
         return {
             "rebuttals": [r for rebuttals, _ in outcomes for r in rebuttals],
             "agent_results": [result for _, result in outcomes],
