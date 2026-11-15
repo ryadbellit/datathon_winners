@@ -6,7 +6,7 @@ import { ASSETS } from '../../data/assets';
 import { ASSET_INTERESTS, COMFORTS, HORIZONS, KNOWLEDGE, OBJECTIVES } from '../../data/options';
 import type { Asset, AssetType, Profile } from '../../data/types';
 import { useAppStore } from '../../shared/store';
-import { assetClassColors, colors } from '../../shared/tokens';
+import { colors } from '../../shared/tokens';
 import { fmtMinutesAgo, fmtPct, fmtUSD } from '../../shared/format';
 import { Card, Chip, Drawer, EmptyState, ProvenanceTag } from '../../shared/ui';
 import {
@@ -25,7 +25,6 @@ type Sort = 'fit' | 'volatility' | 'return';
 type Status = 'in' | 'flags' | 'clear' | 'pending';
 
 const TYPE_LABEL: Record<AssetType, string> = { stock: 'Stocks', etf: 'ETFs', bond: 'Bonds' };
-const CLASS_OF: Record<AssetType, keyof typeof assetClassColors> = { stock: 'Stocks', etf: 'ETFs', bond: 'Bonds' };
 
 interface Delta {
   median: number;
